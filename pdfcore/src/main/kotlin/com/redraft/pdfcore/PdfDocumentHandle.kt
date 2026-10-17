@@ -32,11 +32,13 @@ class PdfDocumentHandle private constructor(
     }
 
     suspend fun pageCount(): Int {
+        assertNotMainThread()
         checkOpen()
         return document.getPageCount()
     }
 
     suspend fun pageSize(index: Int): PdfPageSize {
+        assertNotMainThread()
         checkOpen()
         require(index in 0 until pageCount()) { "Page index $index out of bounds" }
         val page = document.openPage(index)
@@ -56,6 +58,7 @@ class PdfDocumentHandle private constructor(
         targetHeightPx: Int,
         background: Int = Color.WHITE,
     ): Bitmap {
+        assertNotMainThread()
         checkOpen()
         require(targetWidthPx > 0 && targetHeightPx > 0) {
             "Target size must be positive: ${targetWidthPx}x$targetHeightPx"
@@ -81,6 +84,7 @@ class PdfDocumentHandle private constructor(
     }
 
     suspend fun close() {
+        assertNotMainThread()
         if (!closed.compareAndSet(false, true)) return
         withContext(pdfDispatcher) {
             document.close()
@@ -92,6 +96,7 @@ class PdfDocumentHandle private constructor(
         private const val KIND_DOCUMENT = "document"
 
         suspend fun open(bytes: ByteArray): PdfDocumentHandle {
+            assertNotMainThread()
             require(bytes.isNotEmpty()) { "Empty PDF byte array" }
             val core = PdfiumCoreKt(pdfDispatcher)
             val document = core.newDocument(bytes)
