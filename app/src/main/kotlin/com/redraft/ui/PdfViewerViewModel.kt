@@ -17,9 +17,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -48,6 +51,9 @@ class PdfViewerViewModel(
     private val _handle = MutableStateFlow<DocumentHandle?>(null)
     val handle: StateFlow<DocumentHandle?> = _handle.asStateFlow()
 
+    private val _documentOpened = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val documentOpened: SharedFlow<Unit> = _documentOpened.asSharedFlow()
+
     val recents: StateFlow<List<RecentFile>> = recentsRepository.recents
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -64,6 +70,10 @@ class PdfViewerViewModel(
 
     fun clearError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    fun removeRecent(file: RecentFile) {
+        viewModelScope.launch { recentsRepository.remove(file.uri) }
     }
 
     private fun openInternal(uri: String, knownDisplayName: String?) {
@@ -90,6 +100,7 @@ class PdfViewerViewModel(
                         recentsRepository.addOrUpdate(
                             RecentFile(uri = uri, displayName = name, lastOpenedEpochMs = clock()),
                         )
+                        _documentOpened.tryEmit(Unit)
                     },
                     onFailure = { throwable ->
                         _uiState.update {
