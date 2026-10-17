@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Redraft"
 include(":app")
+include(":pdfcore")
