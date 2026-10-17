@@ -18,9 +18,16 @@ import org.json.JSONObject
 
 private val RECENTS_JSON_KEY = stringPreferencesKey("recents_json")
 
+interface RecentsStore {
+    val recents: Flow<List<RecentFile>>
+    suspend fun addOrUpdate(file: RecentFile)
+    suspend fun remove(uri: String)
+    suspend fun clear()
+}
+
 class RecentFilesRepository(
     private val dataStore: DataStore<Preferences>,
-) {
+) : RecentsStore {
 
     constructor(context: Context) : this(
         PreferenceDataStoreFactory.create {
@@ -28,19 +35,19 @@ class RecentFilesRepository(
         },
     )
 
-    val recents: Flow<List<RecentFile>> = dataStore.data
+    override val recents: Flow<List<RecentFile>> = dataStore.data
         .catch { cause ->
             if (cause is IOException) emit(emptyPreferences()) else throw cause
         }
         .map { preferences -> decode(preferences[RECENTS_JSON_KEY]) }
 
-    suspend fun addOrUpdate(file: RecentFile) {
+    override suspend fun addOrUpdate(file: RecentFile) {
         dataStore.edit { preferences ->
             preferences[RECENTS_JSON_KEY] = encode(decode(preferences[RECENTS_JSON_KEY]).upsert(file))
         }
     }
 
-    suspend fun remove(uri: String) {
+    override suspend fun remove(uri: String) {
         dataStore.edit { preferences ->
             val remaining = decode(preferences[RECENTS_JSON_KEY]).filterNot { it.uri == uri }
             if (remaining.isEmpty()) {
@@ -51,7 +58,7 @@ class RecentFilesRepository(
         }
     }
 
-    suspend fun clear() {
+    override suspend fun clear() {
         dataStore.edit { preferences -> preferences.remove(RECENTS_JSON_KEY) }
     }
 
