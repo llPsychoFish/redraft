@@ -42,6 +42,11 @@ data class ViewerUiState(
     val pageSizes: List<PdfPageSize> = emptyList(),
 )
 
+const val MIN_ZOOM = 1f
+const val MAX_ZOOM = 5f
+
+fun clampZoom(zoom: Float): Float = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
+
 class PdfViewerViewModel(
     private val recentsRepository: RecentsStore,
     private val openDocument: suspend (String) -> Result<DocumentHandle>,
@@ -82,7 +87,7 @@ class PdfViewerViewModel(
     }
 
     fun onZoomChanged(zoom: Float) {
-        val clamped = zoom.coerceIn(1f, 5f)
+        val clamped = clampZoom(zoom)
         _uiState.update { it.copy(zoom = clamped) }
     }
 
