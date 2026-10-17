@@ -13,6 +13,7 @@ import com.redraft.data.RecentFile
 import com.redraft.data.RecentFilesRepository
 import com.redraft.data.RecentsStore
 import com.redraft.data.SafDocumentOpener
+import com.redraft.pdfcore.PdfPageSize
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -35,6 +36,10 @@ data class ViewerUiState(
     val pageCount: Int = 0,
     val isLoading: Boolean = false,
     val error: DocumentError? = null,
+    val zoom: Float = 1f,
+    val visiblePageIndex: Int = 0,
+    val scrollOffsetPx: Int = 0,
+    val pageSizes: List<PdfPageSize> = emptyList(),
 )
 
 class PdfViewerViewModel(
@@ -76,6 +81,20 @@ class PdfViewerViewModel(
         viewModelScope.launch { recentsRepository.remove(file.uri) }
     }
 
+    fun onZoomChanged(zoom: Float) {
+        val clamped = zoom.coerceIn(1f, 5f)
+        _uiState.update { it.copy(zoom = clamped) }
+    }
+
+    fun onScroll(visiblePageIndex: Int, offsetPx: Int) {
+        _uiState.update {
+            it.copy(
+                visiblePageIndex = visiblePageIndex.coerceIn(0, (it.pageCount - 1).coerceAtLeast(0)),
+                scrollOffsetPx = offsetPx,
+            )
+        }
+    }
+
     private fun openInternal(uri: String, knownDisplayName: String?) {
         viewModelScope.launch {
             openMutex.withLock {
@@ -95,6 +114,10 @@ class PdfViewerViewModel(
                                 pageCount = opened.pageCount,
                                 isLoading = false,
                                 error = null,
+                                zoom = 1f,
+                                visiblePageIndex = 0,
+                                scrollOffsetPx = 0,
+                                pageSizes = emptyList(),
                             )
                         }
                         recentsRepository.addOrUpdate(
@@ -109,6 +132,10 @@ class PdfViewerViewModel(
                                 pageCount = 0,
                                 isLoading = false,
                                 error = throwable.toDocumentError(),
+                                zoom = 1f,
+                                visiblePageIndex = 0,
+                                scrollOffsetPx = 0,
+                                pageSizes = emptyList(),
                             )
                         }
                         if (knownDisplayName != null) {
