@@ -1,9 +1,6 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
-    <style name="Base.Theme.Redraft" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
-    </style>
+    <!-- Base application theme. Compose provides all in-app styling (UI-SPEC: Material 3 defaults). -->
+    <style name="Base.Theme.Redraft" parent="android:Theme.Material.Light.NoActionBar" />
 
     <style name="Theme.Redraft" parent="Base.Theme.Redraft" />
 </resources>

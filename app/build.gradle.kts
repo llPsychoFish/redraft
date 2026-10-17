@@ -54,13 +54,6 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.datastore.preferences)
 
-    // Legacy view-template dependencies kept only while the template MainActivity/
-    // activity_main.xml still exist; removed together with them (plan 01-01 deviation: cleanup deferred to Task 3).
-    implementation(libs.androidx.activity.ktx)
-    implementation(libs.androidx.appcompat)
-    implementation(libs.material)
-    implementation(libs.androidx.constraintlayout)
-
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
