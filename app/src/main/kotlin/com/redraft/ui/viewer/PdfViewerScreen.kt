@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
 import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.ui.PdfViewerViewModel
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -164,27 +165,53 @@ private fun PdfPageItem(
         onDispose { cache.release(key) }
     }
 
-    LaunchedEffect(handle, bitmap, key, renderTick, viewportWidthPx) {
+    // Load the page's intrinsic size/rotation once.
+    LaunchedEffect(handle, pageIndex) {
+        val current = handle ?: return@LaunchedEffect
+        if (pageSize == null) {
+            pageSize = current.pageSize(pageIndex)
+        }
+    }
+
+    val size = pageSize
+    val transform = remember(size, viewportWidthPx) {
+        size?.let {
+            val baseHeightPx = (viewportWidthPx * it.heightPt / it.widthPt)
+                .roundToInt()
+                .coerceAtLeast(1)
+            PdfViewportTransform(
+                pageWidthPt = it.widthPt,
+                pageHeightPt = it.heightPt,
+                rotationDegrees = it.rotationDegrees,
+                renderedWidthPx = viewportWidthPx,
+                renderedHeightPx = baseHeightPx,
+            )
+        }
+    }
+
+    val display = transform?.renderedSize(bucketZoom)
+
+    LaunchedEffect(handle, bitmap, key, renderTick, display?.widthPx, display?.heightPx) {
         val current = bitmap
-        if (current != null || handle == null || viewportWidthPx <= 0) return@LaunchedEffect
-        val size = pageSize ?: handle.pageSize(pageIndex).also { pageSize = it }
-        val targetWidth = (viewportWidthPx * bucketZoom).roundToInt().coerceAtLeast(1)
-        val targetHeight = (targetWidth * size.heightPt / size.widthPt)
-            .roundToInt()
-            .coerceAtLeast(1)
+        if (current != null || handle == null) return@LaunchedEffect
+        val dimensions = display ?: return@LaunchedEffect
+        if (dimensions.widthPx <= 0 || dimensions.heightPx <= 0) return@LaunchedEffect
         val rendered = withContext(Dispatchers.IO) {
-            handle.renderPage(pageIndex, targetWidth, targetHeight)
+            handle.renderPage(pageIndex, dimensions.widthPx, dimensions.heightPx)
         }
         cache.put(key, rendered)
         bitmap = rendered
     }
 
-    val aspect = pageSize?.let { it.heightPt / it.widthPt } ?: (792f / 612f)
+    // Fallback (letter) aspect until the page size loads, so layout never jumps to zero.
+    val fallbackAspect = 792f / 612f
     val widthDp = with(LocalDensity.current) {
-        (viewportWidthPx * bucketZoom).roundToInt().toDp()
+        ((display?.widthPx ?: (viewportWidthPx * bucketZoom).roundToInt())
+            .coerceAtLeast(1)).toDp()
     }
     val heightDp = with(LocalDensity.current) {
-        (viewportWidthPx * bucketZoom * aspect).roundToInt().toDp()
+        ((display?.heightPx ?: (viewportWidthPx * bucketZoom * fallbackAspect).roundToInt())
+            .coerceAtLeast(1)).toDp()
     }
 
     Box(
