@@ -41,6 +41,8 @@ data class ViewerUiState(
     val zoom: Float = 1f,
     val visiblePageIndex: Int = 0,
     val scrollOffsetPx: Int = 0,
+    val panX: Float = 0f,
+    val panY: Float = 0f,
     val pageSizes: List<PdfPageSize> = emptyList(),
 )
 
@@ -94,6 +96,10 @@ class PdfViewerViewModel(
         _uiState.update { it.copy(zoom = clamped) }
     }
 
+    fun onPanChanged(panX: Float, panY: Float) {
+        _uiState.update { it.copy(panX = panX, panY = panY) }
+    }
+
     fun onScroll(visiblePageIndex: Int, offsetPx: Int) {
         _uiState.update {
             it.copy(
@@ -127,6 +133,8 @@ class PdfViewerViewModel(
                                 zoom = 1f,
                                 visiblePageIndex = 0,
                                 scrollOffsetPx = 0,
+                                panX = 0f,
+                                panY = 0f,
                                 pageSizes = emptyList(),
                             )
                         }
@@ -145,6 +153,8 @@ class PdfViewerViewModel(
                                 zoom = 1f,
                                 visiblePageIndex = 0,
                                 scrollOffsetPx = 0,
+                                panX = 0f,
+                                panY = 0f,
                                 pageSizes = emptyList(),
                             )
                         }

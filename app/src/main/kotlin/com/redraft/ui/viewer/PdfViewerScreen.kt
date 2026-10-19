@@ -2,8 +2,9 @@ package com.redraft.ui.viewer
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -114,6 +115,8 @@ fun PdfViewerScreen(
                         pageIndex = pageIndex,
                         pageCount = uiState.pageCount,
                         zoom = uiState.zoom,
+                        panX = uiState.panX,
+                        panY = uiState.panY,
                         viewportWidthPx = viewportWidthPx,
                         handle = handle,
                         cache = cache,
@@ -127,8 +130,40 @@ fun PdfViewerScreen(
 
 private fun Modifier.zoomInput(viewModel: PdfViewerViewModel): Modifier = this
     .pointerInput(Unit) {
-        detectTransformGestures { _, _, zoomChange, _ ->
-            viewModel.onZoomChanged(viewModel.uiState.value.zoom * zoomChange)
+        // Custom multi-touch handler (gap G-01-5): detectTransformGestures never reached
+        // multi-touch mode because the LazyColumn's own scroll detector consumed the
+        // second pointer-down first. Here we track the two pressed pointers ourselves
+        // and only consume once both are down, leaving single-finger drags to the list.
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false)
+            var previousPair: TouchPair? = null
+            while (true) {
+                val event = awaitPointerEvent()
+                val pressed = event.changes.filter { it.pressed }
+                if (pressed.isEmpty()) break
+                if (pressed.size >= 2) {
+                    val currentPair = TouchPair(
+                        pressed[0].position.x,
+                        pressed[0].position.y,
+                        pressed[1].position.x,
+                        pressed[1].position.y,
+                    )
+                    previousPair?.let { previous ->
+                        val delta = gestureDelta(previous, currentPair)
+                        viewModel.onZoomChanged(viewModel.uiState.value.zoom * delta.zoomChange)
+                        viewModel.onPanChanged(
+                            viewModel.uiState.value.panX + delta.panX,
+                            viewModel.uiState.value.panY + delta.panY,
+                        )
+                    }
+                    previousPair = currentPair
+                    event.changes.forEach { it.consume() }
+                } else {
+                    // Single pointer: leave the event unconsumed so the LazyColumn keeps
+                    // scrolling (paging) instead of zooming.
+                    previousPair = null
+                }
+            }
         }
     }
     .pointerInput(Unit) {
@@ -143,6 +178,8 @@ private fun PdfPageItem(
     pageIndex: Int,
     pageCount: Int,
     zoom: Float,
+    panX: Float,
+    panY: Float,
     viewportWidthPx: Int,
     handle: DocumentHandle?,
     cache: PageBitmapCache,
@@ -243,6 +280,10 @@ private fun PdfPageItem(
                         scaleX = scale
                         scaleY = scale
                         transformOrigin = TransformOrigin(0.5f, 0f)
+                        // Two-finger drag pans the zoomed page (D-07: pan lives in
+                        // the ViewModel so it survives rotation).
+                        translationX = panX
+                        translationY = panY
                     }
                     .semantics { contentDescription = "Page ${pageIndex + 1} of $pageCount" },
             )
