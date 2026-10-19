@@ -93,6 +93,7 @@ class PdfViewerViewModelTest {
         openDocument = { uri -> opener(uri) },
         resolveDisplayName = { "resolved-name" },
         clock = { 0L },
+        ioDispatcher = dispatcher,
         cleanupScope = CoroutineScope(SupervisorJob() + dispatcher),
     )
 
@@ -128,6 +129,7 @@ class PdfViewerViewModelTest {
                     },
                     resolveDisplayName = { "doc" },
                     clock = { 0L },
+                    ioDispatcher = dispatcher,
                     cleanupScope = CoroutineScope(SupervisorJob() + dispatcher),
                 )
             }

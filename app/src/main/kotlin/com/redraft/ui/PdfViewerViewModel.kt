@@ -14,6 +14,7 @@ import com.redraft.data.RecentFilesRepository
 import com.redraft.data.RecentsStore
 import com.redraft.data.SafDocumentOpener
 import com.redraft.pdfcore.PdfPageSize
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -28,6 +29,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -52,7 +54,8 @@ class PdfViewerViewModel(
     private val openDocument: suspend (String) -> Result<DocumentHandle>,
     private val resolveDisplayName: (String) -> String,
     private val clock: () -> Long = System::currentTimeMillis,
-    private val cleanupScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val cleanupScope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ViewerUiState())
@@ -104,7 +107,9 @@ class PdfViewerViewModel(
         viewModelScope.launch {
             openMutex.withLock {
                 _uiState.update { it.copy(isLoading = true, error = null) }
-                currentHandle?.close()
+                withContext(ioDispatcher) {
+                    currentHandle?.close()
+                }
                 currentHandle = null
                 _handle.value = null
 

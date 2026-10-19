@@ -169,7 +169,9 @@ private fun PdfPageItem(
     LaunchedEffect(handle, pageIndex) {
         val current = handle ?: return@LaunchedEffect
         if (pageSize == null) {
-            pageSize = current.pageSize(pageIndex)
+            pageSize = withContext(Dispatchers.IO) {
+                current.pageSize(pageIndex)
+            }
         }
     }
 
