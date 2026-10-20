@@ -79,3 +79,18 @@ fun panBounds(viewportWidthPx: Float, zoom: Float): ClosedFloatingPointRange<Flo
  */
 fun clampPanX(panX: Float, viewportWidthPx: Float, zoom: Float): Float =
     panX.coerceIn(panBounds(viewportWidthPx, zoom))
+
+/**
+ * Whether a requested pan actually moves the page.
+ *
+ * False means the pan is already at a boundary and the request pushes
+ * further out - the page cannot move any further in that direction. The
+ * caller uses this to decide whether to keep consuming the gesture: at a
+ * boundary the gesture must be released so the list scroll can take it
+ * (the edge lock of a nested pan/scroll pair).
+ */
+fun panWouldMove(
+    requestedPanX: Float,
+    viewportWidthPx: Float,
+    zoom: Float,
+): Boolean = clampPanX(requestedPanX, viewportWidthPx, zoom) == requestedPanX
