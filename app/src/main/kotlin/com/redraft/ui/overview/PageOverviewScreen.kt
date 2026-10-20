@@ -70,6 +70,11 @@ fun PageOverviewRoute(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val handle by viewModel.handle.collectAsStateWithLifecycle()
 
+    // A selection POPS the navigation, so it must fire at most once per entry
+    // into the overview: a double tap is two clicks, and the second pop would
+    // close the document as well (the viewer would be on top by then).
+    var selectionHandled by remember { mutableStateOf(false) }
+
     // Leaving the overview WITHOUT tapping a page must not emit a scroll
     // command. The viewer's own position is restored by its saveable list
     // state, and a command would additionally reset the reader to the TOP of
@@ -94,6 +99,8 @@ fun PageOverviewRoute(
             handle = handle,
             pageCount = uiState.pageCount,
             onPageSelected = { pageIndex ->
+                if (selectionHandled) return@PageOverviewGrid
+                selectionHandled = true
                 onPageSelected(pageIndex)
             },
             modifier = Modifier

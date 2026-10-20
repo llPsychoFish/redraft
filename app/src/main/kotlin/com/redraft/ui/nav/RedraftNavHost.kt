@@ -1,6 +1,7 @@
 package com.redraft.ui.nav
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -11,6 +12,7 @@ import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.home.HomeScreen
 import com.redraft.ui.overview.PageOverviewRoute
 import com.redraft.ui.viewer.ViewerRoute
+import kotlinx.coroutines.launch
 
 const val ROUTE_HOME = "home"
 const val ROUTE_VIEWER = "viewer"
@@ -21,6 +23,7 @@ fun RedraftNavHost(modifier: Modifier = Modifier) {
     val navController = rememberNavController()
     val context = LocalContext.current
     val viewModel: PdfViewerViewModel = viewModel(factory = PdfViewerViewModel.factory(context))
+    val scope = rememberCoroutineScope()
 
     NavHost(
         navController = navController,
@@ -46,7 +49,10 @@ fun RedraftNavHost(modifier: Modifier = Modifier) {
                 onBack = { navController.popBackStack() },
                 onPageSelected = { pageIndex ->
                     viewModel.onScrollCommanded(pageIndex)
-                    navController.popBackStack()
+                    // Pop back to the VIEWER specifically, never off the top of the
+                    // stack: a bare popBackStack() would close the document if it
+                    // were ever called twice.
+                    scope.launch { navController.popBackStack(ROUTE_VIEWER, inclusive = false) }
                 },
             )
         }
