@@ -1,6 +1,8 @@
 package com.redraft.ui.viewer
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -185,5 +187,51 @@ class ZoomAnchorTest {
     fun `a positive pan at zoom one is clamped to zero`() {
         assertEquals(0f, clampPanX(500f, 1000f, 1f), TOLERANCE)
         assertEquals(0f, clampPanX(99999f, 1000f, 1f), TOLERANCE)
+    }
+
+    // panWouldMove ------------------------------------------------------------
+    //
+    // Whether a requested pan actually moves the page (plan 01-09). The
+    // gesture handler uses it to decide whether to keep consuming the drag:
+    // at a boundary the gesture must be RELEASED so the list scroll can take
+    // it back - the edge lock of a nested pan/scroll pair.
+
+    @Test
+    fun `a pan strictly inside the bounds would move`() {
+        assertTrue(panWouldMove(0f, 1000f, 3f))
+        assertTrue(panWouldMove(500f, 1000f, 3f))
+        assertTrue(panWouldMove(-500f, 1000f, 3f))
+    }
+
+    @Test
+    fun `a pan beyond the upper bound would not move`() {
+        // At zoom 3 the pan can reach +1000 and no further, so a request to
+        // push further out cannot move the page.
+        assertFalse(panWouldMove(1500f, 1000f, 3f))
+        assertFalse(panWouldMove(99999f, 1000f, 3f))
+    }
+
+    @Test
+    fun `a pan beyond the lower bound would not move`() {
+        assertFalse(panWouldMove(-1500f, 1000f, 3f))
+        assertFalse(panWouldMove(-99999f, 1000f, 3f))
+    }
+
+    @Test
+    fun `a pan exactly on a bound would move`() {
+        // A request exactly ON a bound is INSIDE the closed range: the pan
+        // does not need to move, but it is not being pushed outward either.
+        // The rule is "release only when pushing out", so this returns true.
+        assertTrue(panWouldMove(1000f, 1000f, 3f))
+        assertTrue(panWouldMove(-1000f, 1000f, 3f))
+    }
+
+    @Test
+    fun `at zoom one no pan would move`() {
+        // The page fits the viewport: the range is empty, so any non-zero
+        // request is pushing out of it.
+        assertFalse(panWouldMove(120f, 1000f, 1f))
+        assertFalse(panWouldMove(-120f, 1000f, 1f))
+        assertTrue(panWouldMove(0f, 1000f, 1f))
     }
 }
