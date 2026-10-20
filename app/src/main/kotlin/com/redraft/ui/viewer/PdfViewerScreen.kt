@@ -198,8 +198,15 @@ private fun PdfPageItem(
         snapshotFlow { zoom }.debounce(DEBOUNCE_MS).collect { renderTick++ }
     }
 
-    DisposableEffect(key) {
-        onDispose { cache.release(key) }
+    // Hold a display claim on the bitmap this item is drawing.
+    // Keyed on the bitmap, not the cache key: a re-render swaps the bitmap under
+    // the same key, and the claim must follow the bitmap that was drawn. The
+    // claim is what stops the cache from recycling a bitmap that is on screen
+    // (threat T-03-02).
+    DisposableEffect(bitmap) {
+        val drawn = bitmap
+        if (drawn != null) cache.retainDisplay(drawn)
+        onDispose { if (drawn != null) cache.releaseDisplay(drawn) }
     }
 
     // Load the page's intrinsic size/rotation once.
