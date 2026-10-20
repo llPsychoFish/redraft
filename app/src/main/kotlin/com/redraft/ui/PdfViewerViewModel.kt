@@ -148,6 +148,24 @@ class PdfViewerViewModel(
         }
     }
 
+    /**
+     * Marks a scroll command as applied, so it is never applied twice.
+     *
+     * The command must be one-shot in EFFECT, not only in the data: the
+     * viewer's effect re-runs on every re-composition, so a command that is
+     * never cleared would be re-applied whenever the viewer is rebuilt - a
+     * rotation, or a return from the page overview - overriding the saveable
+     * list state and dropping the reader back to the commanded page.
+     *
+     * The token is checked so that a command which has already been replaced
+     * by a newer one is not cleared by mistake.
+     */
+    fun onScrollCommandConsumed(token: Long) {
+        _uiState.update { state ->
+            if (state.scrollCommand?.token == token) state.copy(scrollCommand = null) else state
+        }
+    }
+
     private fun openInternal(uri: String, knownDisplayName: String?) {
         viewModelScope.launch {
             openMutex.withLock {
