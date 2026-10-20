@@ -228,6 +228,51 @@ class PdfViewerViewModelTest {
     }
 
     @Test
+    fun consuming_a_scroll_command_clears_it_from_the_state() = runTest(dispatcher) {
+        val vm = viewModel(FakeRecents()) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
+        vm.open("uri-ok")
+        advanceUntilIdle()
+
+        vm.onScrollCommanded(2)
+        val token = vm.uiState.value.scrollCommand?.token
+        assertNotNull(token)
+
+        vm.onScrollCommandConsumed(token!!)
+
+        assertNull(vm.uiState.value.scrollCommand)
+    }
+
+    @Test
+    fun consuming_a_stale_token_does_not_clear_a_newer_command() = runTest(dispatcher) {
+        val vm = viewModel(FakeRecents()) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
+        vm.open("uri-ok")
+        advanceUntilIdle()
+
+        vm.onScrollCommanded(1)
+        val staleToken = vm.uiState.value.scrollCommand?.token
+        vm.onScrollCommanded(2)
+        val newer = vm.uiState.value.scrollCommand
+        assertNotNull(newer)
+
+        vm.onScrollCommandConsumed(staleToken!!)
+
+        assertEquals(newer, vm.uiState.value.scrollCommand)
+    }
+
+    @Test
+    fun an_unconsumed_command_is_still_in_the_state() = runTest(dispatcher) {
+        val vm = viewModel(FakeRecents()) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
+        vm.open("uri-ok")
+        advanceUntilIdle()
+
+        vm.onScrollCommanded(2)
+
+        val command = vm.uiState.value.scrollCommand
+        assertNotNull(command)
+        assertEquals(2, command?.pageIndex)
+    }
+
+    @Test
     fun successful_open_records_recent_and_updates_state() = runTest(dispatcher) {
         val recents = FakeRecents()
         val vm = viewModel(recents) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
