@@ -135,4 +135,45 @@ class ZoomAnchorTest {
         assertEquals(-2000f, clampPanX(-3000f, 1000f, 3f), TOLERANCE)
         assertEquals(0f, clampPanX(300f, 1000f, 3f), TOLERANCE)
     }
+
+    // panBounds ----------------------------------------------------------------
+    //
+    // The bounds the one-finger horizontal pan depends on (plan 01-07): the
+    // page is laid out at viewportWidth * zoom, so it is wider than the
+    // viewport as soon as zoom > 1 and can be dragged left to reveal its far
+    // end - but no further, and never to the right of its left edge.
+
+    @Test
+    fun `pan bounds are empty at zoom one`() {
+        val bounds = panBounds(viewportWidthPx = 1000f, zoom = 1f)
+        assertEquals(0f, bounds.start, TOLERANCE)
+        assertEquals(0f, bounds.endInclusive, TOLERANCE)
+        // The page fits the screen: there is nothing to reveal, so the pan
+        // stays at 0 whatever the drag asks for.
+        assertEquals(0f, clampPanX(120f, 1000f, 1f), TOLERANCE)
+        assertEquals(0f, clampPanX(-120f, 1000f, 1f), TOLERANCE)
+    }
+
+    @Test
+    fun `pan bounds at zoom three reach two viewports to the left`() {
+        // The page is 3000 px wide in a 1000 px viewport, so the far end is
+        // 2000 px to the left of the left edge.
+        val bounds = panBounds(viewportWidthPx = 1000f, zoom = 3f)
+        assertEquals(-2000f, bounds.start, TOLERANCE)
+        assertEquals(0f, bounds.endInclusive, TOLERANCE)
+    }
+
+    @Test
+    fun `a pan below the lower bound is clamped to the lower bound`() {
+        assertEquals(-2000f, clampPanX(-2500f, 1000f, 3f), TOLERANCE)
+        assertEquals(-2000f, clampPanX(-99999f, 1000f, 3f), TOLERANCE)
+    }
+
+    @Test
+    fun `a positive pan is clamped to zero`() {
+        // The page's left edge is the origin: it can never be dragged to the
+        // right of it.
+        assertEquals(0f, clampPanX(1f, 1000f, 3f), TOLERANCE)
+        assertEquals(0f, clampPanX(99999f, 1000f, 3f), TOLERANCE)
+    }
 }
