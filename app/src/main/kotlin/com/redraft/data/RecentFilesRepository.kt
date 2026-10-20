@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.datastore.preferences.preferencesDataStoreFile
 import java.io.IOException
 import kotlinx.coroutines.flow.Flow
@@ -17,6 +18,22 @@ import org.json.JSONException
 import org.json.JSONObject
 
 private val RECENTS_JSON_KEY = stringPreferencesKey("recents_json")
+
+/**
+ * The one DataStore instance for the recents file, per process.
+ *
+ * DataStore allows exactly one active instance per file: a second one throws
+ * `IllegalStateException: There are multiple DataStores active for the same
+ * file` the first time it reads. Creating the store with
+ * `PreferenceDataStoreFactory.create { ... }` inside a constructor produced a
+ * NEW instance for every `RecentFilesRepository`, so a second ViewModel built
+ * while the first was still alive crashed the app. The `preferencesDataStore`
+ * delegate builds the store once, against the application context, and hands
+ * the same instance to every caller.
+ */
+private val Context.recentsDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "recents",
+)
 
 interface RecentsStore {
     val recents: Flow<List<RecentFile>>
@@ -29,11 +46,7 @@ class RecentFilesRepository(
     private val dataStore: DataStore<Preferences>,
 ) : RecentsStore {
 
-    constructor(context: Context) : this(
-        PreferenceDataStoreFactory.create {
-            context.applicationContext.preferencesDataStoreFile("recents")
-        },
-    )
+    constructor(context: Context) : this(context.applicationContext.recentsDataStore)
 
     override val recents: Flow<List<RecentFile>> = dataStore.data
         .catch { cause ->
