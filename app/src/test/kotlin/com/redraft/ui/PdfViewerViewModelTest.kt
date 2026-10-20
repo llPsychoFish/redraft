@@ -24,6 +24,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -165,6 +166,65 @@ class PdfViewerViewModelTest {
 
         assertTrue("uri-x" in recents.removed)
         assertTrue(vm.uiState.value.error is DocumentError.AccessRevoked)
+    }
+
+    @Test
+    fun onScrollCommanded_puts_a_command_in_the_state_with_the_requested_page() = runTest(dispatcher) {
+        val vm = viewModel(FakeRecents()) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
+        vm.open("uri-ok")
+        advanceUntilIdle()
+
+        vm.onScrollCommanded(2)
+
+        val command = vm.uiState.value.scrollCommand
+        assertNotNull(command)
+        assertEquals(2, command?.pageIndex)
+        assertEquals(0, command?.offsetPx)
+    }
+
+    @Test
+    fun onScrollCommanded_clamps_the_page_index_to_the_document() = runTest(dispatcher) {
+        val vm = viewModel(FakeRecents()) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
+        vm.open("uri-ok")
+        advanceUntilIdle()
+
+        vm.onScrollCommanded(99)
+
+        assertEquals(2, vm.uiState.value.scrollCommand?.pageIndex)
+    }
+
+    @Test
+    fun two_commands_to_the_same_page_are_two_different_commands() = runTest(dispatcher) {
+        val vm = viewModel(FakeRecents()) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
+        vm.open("uri-ok")
+        advanceUntilIdle()
+
+        vm.onScrollCommanded(1)
+        val first = vm.uiState.value.scrollCommand
+        vm.onScrollCommanded(1)
+        val second = vm.uiState.value.scrollCommand
+
+        assertNotNull(first)
+        assertNotNull(second)
+        assertEquals(1, first?.pageIndex)
+        assertEquals(1, second?.pageIndex)
+        assertTrue(
+            "the token must advance so the second command is not equal to the first",
+            (second?.token ?: 0L) != (first?.token ?: 0L),
+        )
+    }
+
+    @Test
+    fun successful_open_commands_the_list_to_page_zero() = runTest(dispatcher) {
+        val vm = viewModel(FakeRecents()) { Result.success(FakeHandle(3, "doc", mutableListOf())) }
+
+        vm.open("uri-ok")
+        advanceUntilIdle()
+
+        val command = vm.uiState.value.scrollCommand
+        assertNotNull(command)
+        assertEquals(0, command?.pageIndex)
+        assertEquals(0, command?.offsetPx)
     }
 
     @Test
