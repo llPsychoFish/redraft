@@ -46,6 +46,20 @@ fun anchorScrollOffset(
 }
 
 /**
+ * The range the horizontal pan may take for a zoomed page.
+ *
+ * The page is laid out at `viewportWidthPx * zoom`, so it is wider than the
+ * viewport as soon as `zoom > 1` and starts at the LEFT edge of the content.
+ * It can therefore be dragged LEFT to reveal its far end - by exactly the
+ * amount it overflows the viewport - and no further. It can never be dragged
+ * to the right of its left edge.
+ *
+ * At `zoom == 1` the page fits the viewport and the range is empty.
+ */
+fun panBounds(viewportWidthPx: Float, zoom: Float): ClosedFloatingPointRange<Float> =
+    (viewportWidthPx * (1f - zoom))..0f
+
+/**
  * The horizontal pan, clamped to the content bounds.
  *
  * A zoomed page is wider than the viewport, so it can be panned sideways -
@@ -53,4 +67,4 @@ fun anchorScrollOffset(
  * scroll owns it (D-06).
  */
 fun clampPanX(panX: Float, viewportWidthPx: Float, zoom: Float): Float =
-    panX.coerceIn(viewportWidthPx * (1f - zoom), 0f)
+    panX.coerceIn(panBounds(viewportWidthPx, zoom))

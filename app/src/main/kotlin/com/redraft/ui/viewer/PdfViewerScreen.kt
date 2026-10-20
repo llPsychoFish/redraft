@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
@@ -37,6 +38,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
@@ -382,6 +384,11 @@ private fun PdfPageItem(
                         width = with(LocalDensity.current) { current.width.toDp() },
                         height = with(LocalDensity.current) { current.height.toDp() },
                     )
+                    // The pan is a LAYOUT offset, in screen pixels: a graphicsLayer
+                    // translation would be scaled by the zoom factor, which makes the
+                    // pan bounds depend on the zoom in a way that cannot be reasoned
+                    // about (and cannot be clamped correctly).
+                    .offset { IntOffset(panX.roundToInt(), 0) }
                     .graphicsLayer {
                         // The single uniform zoom factor: the live zoom over the
                         // bucket the bitmap was actually rendered at. One value
@@ -391,10 +398,6 @@ private fun PdfPageItem(
                         scaleX = scale
                         scaleY = scale
                         transformOrigin = TransformOrigin(0.5f, 0f)
-                        // Two-finger drag pans the zoomed page (D-07: pan lives in
-                        // the ViewModel so it survives rotation). The vertical
-                        // axis belongs to the list scroll (D-06).
-                        translationX = panX
                     }
                     .semantics { contentDescription = "Page ${pageIndex + 1} of $pageCount" },
             )
