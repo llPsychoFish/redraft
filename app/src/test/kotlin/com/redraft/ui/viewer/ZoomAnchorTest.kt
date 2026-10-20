@@ -125,23 +125,24 @@ class ZoomAnchorTest {
     @Test
     fun `pan inside the bounds is unchanged`() {
         assertEquals(-500f, clampPanX(-500f, 1000f, 3f), TOLERANCE)
-        assertEquals(-2000f, clampPanX(-2000f, 1000f, 3f), TOLERANCE)
+        assertEquals(500f, clampPanX(500f, 1000f, 3f), TOLERANCE)
     }
 
     @Test
     fun `pan beyond the bounds is clamped`() {
-        // At zoom 3 the page is twice the viewport's width, so the pan can
-        // reach -2 * viewportWidth but no further.
-        assertEquals(-2000f, clampPanX(-3000f, 1000f, 3f), TOLERANCE)
-        assertEquals(0f, clampPanX(300f, 1000f, 3f), TOLERANCE)
+        // At zoom 3 the page overflows the viewport by 1000 px on EACH side,
+        // so the pan can reach -1000 and +1000 but no further.
+        assertEquals(-1000f, clampPanX(-3000f, 1000f, 3f), TOLERANCE)
+        assertEquals(1000f, clampPanX(3000f, 1000f, 3f), TOLERANCE)
     }
 
     // panBounds ----------------------------------------------------------------
     //
-    // The bounds the one-finger horizontal pan depends on (plan 01-07): the
-    // page is laid out at viewportWidth * zoom, so it is wider than the
-    // viewport as soon as zoom > 1 and can be dragged left to reveal its far
-    // end - but no further, and never to the right of its left edge.
+    // The bounds the one-finger horizontal pan depends on (plan 01-08): the
+    // page is drawn CENTRED in the viewport and is wider than the viewport as
+    // soon as zoom > 1, so it overflows the viewport by
+    // (viewportWidth * zoom - viewportWidth) / 2 on EACH side. The pan has to
+    // reach both ends - and no further, or a gap opens on the opposite side.
 
     @Test
     fun `pan bounds are empty at zoom one`() {
@@ -155,25 +156,34 @@ class ZoomAnchorTest {
     }
 
     @Test
-    fun `pan bounds at zoom three reach two viewports to the left`() {
-        // The page is 3000 px wide in a 1000 px viewport, so the far end is
-        // 2000 px to the left of the left edge.
+    fun `pan bounds at zoom three reach half an overflow on each side`() {
+        // The page is 3000 px wide in a 1000 px viewport, so it overflows the
+        // viewport by 1000 px on the left AND on the right.
         val bounds = panBounds(viewportWidthPx = 1000f, zoom = 3f)
-        assertEquals(-2000f, bounds.start, TOLERANCE)
-        assertEquals(0f, bounds.endInclusive, TOLERANCE)
+        assertEquals(-1000f, bounds.start, TOLERANCE)
+        assertEquals(1000f, bounds.endInclusive, TOLERANCE)
+        // The range is symmetric about zero: the page can be dragged equally
+        // far in both directions.
+        assertEquals(-bounds.endInclusive, bounds.start, TOLERANCE)
     }
 
     @Test
     fun `a pan below the lower bound is clamped to the lower bound`() {
-        assertEquals(-2000f, clampPanX(-2500f, 1000f, 3f), TOLERANCE)
-        assertEquals(-2000f, clampPanX(-99999f, 1000f, 3f), TOLERANCE)
+        assertEquals(-1000f, clampPanX(-2500f, 1000f, 3f), TOLERANCE)
+        assertEquals(-1000f, clampPanX(-99999f, 1000f, 3f), TOLERANCE)
     }
 
     @Test
-    fun `a positive pan is clamped to zero`() {
-        // The page's left edge is the origin: it can never be dragged to the
-        // right of it.
-        assertEquals(0f, clampPanX(1f, 1000f, 3f), TOLERANCE)
-        assertEquals(0f, clampPanX(99999f, 1000f, 3f), TOLERANCE)
+    fun `a pan above the upper bound is clamped to the upper bound`() {
+        // The page's right end is reachable: the page can be dragged to the
+        // right until its right edge meets the viewport's right edge.
+        assertEquals(1000f, clampPanX(1f, 1000f, 3f), TOLERANCE)
+        assertEquals(1000f, clampPanX(99999f, 1000f, 3f), TOLERANCE)
+    }
+
+    @Test
+    fun `a positive pan at zoom one is clamped to zero`() {
+        assertEquals(0f, clampPanX(500f, 1000f, 1f), TOLERANCE)
+        assertEquals(0f, clampPanX(99999f, 1000f, 1f), TOLERANCE)
     }
 }
