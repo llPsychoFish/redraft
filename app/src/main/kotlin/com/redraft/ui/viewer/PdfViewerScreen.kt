@@ -69,24 +69,25 @@ fun PdfViewerScreen(
         onDispose { cache.recycleAll() }
     }
 
-    // Restore scroll position from the ViewModel (survives rotation, D-07).
+    // Apply a scroll COMMAND. This is the ONLY thing that may move the list.
     //
-    // Guarded by the gesture flag: while a pinch is running, the focal
-    // anchoring owns the scroll position, and this effect would fight it by
-    // scrolling back to the ViewModel's last known position.
-    LaunchedEffect(
-        uiState.visiblePageIndex,
-        uiState.scrollOffsetPx,
-        uiState.pageCount,
-        uiState.gestureActive,
-    ) {
+    // The old effect restored the position from the ViewModel's MIRROR of the
+    // scroll, which is one frame behind the list during a fling - so it
+    // yanked the list back and cancelled the fling, and a hard flick could
+    // only ever move one page.
+    //
+    // The gesture guard defers a command that arrives while a pinch is
+    // running: the focal anchoring owns the scroll position then. The effect
+    // re-runs when the gesture flag clears, so the command is applied after.
+    LaunchedEffect(uiState.scrollCommand, uiState.gestureActive) {
+        val command = uiState.scrollCommand ?: return@LaunchedEffect
         if (uiState.gestureActive) return@LaunchedEffect
-        if (uiState.pageCount > 0 && listState.firstVisibleItemIndex != uiState.visiblePageIndex) {
-            listState.scrollToItem(uiState.visiblePageIndex, uiState.scrollOffsetPx)
-        }
+        if (command.pageIndex !in 0 until uiState.pageCount) return@LaunchedEffect
+        listState.scrollToItem(command.pageIndex, command.offsetPx)
     }
 
-    // Write scroll position back into the ViewModel.
+    // Mirror the scroll position into the ViewModel. This is a MIRROR, not a
+    // command: nothing may move the list based on it.
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
             .collect { (index, offset) -> viewModel.onScroll(index, offset) }
