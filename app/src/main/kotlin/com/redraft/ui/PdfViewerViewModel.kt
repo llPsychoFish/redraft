@@ -42,8 +42,10 @@ data class ViewerUiState(
     val visiblePageIndex: Int = 0,
     val scrollOffsetPx: Int = 0,
     val panX: Float = 0f,
-    val panY: Float = 0f,
     val pageSizes: List<PdfPageSize> = emptyList(),
+    // True while a pinch gesture owns the scroll position. The scroll-restore
+    // effect must not fight the focal anchoring while it is set (D-06, D-07).
+    val gestureActive: Boolean = false,
 )
 
 const val MIN_ZOOM = 1f
@@ -96,8 +98,12 @@ class PdfViewerViewModel(
         _uiState.update { it.copy(zoom = clamped) }
     }
 
-    fun onPanChanged(panX: Float, panY: Float) {
-        _uiState.update { it.copy(panX = panX, panY = panY) }
+    fun onPanChanged(panX: Float) {
+        _uiState.update { it.copy(panX = panX) }
+    }
+
+    fun onGestureActiveChanged(active: Boolean) {
+        _uiState.update { it.copy(gestureActive = active) }
     }
 
     fun onScroll(visiblePageIndex: Int, offsetPx: Int) {
@@ -134,7 +140,6 @@ class PdfViewerViewModel(
                                 visiblePageIndex = 0,
                                 scrollOffsetPx = 0,
                                 panX = 0f,
-                                panY = 0f,
                                 pageSizes = emptyList(),
                             )
                         }
@@ -154,7 +159,6 @@ class PdfViewerViewModel(
                                 visiblePageIndex = 0,
                                 scrollOffsetPx = 0,
                                 panX = 0f,
-                                panY = 0f,
                                 pageSizes = emptyList(),
                             )
                         }

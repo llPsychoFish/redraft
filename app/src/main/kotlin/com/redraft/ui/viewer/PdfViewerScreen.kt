@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -65,7 +66,17 @@ fun PdfViewerScreen(
     }
 
     // Restore scroll position from the ViewModel (survives rotation, D-07).
-    LaunchedEffect(uiState.visiblePageIndex, uiState.scrollOffsetPx, uiState.pageCount) {
+    //
+    // Guarded by the gesture flag: while a pinch is running, the focal
+    // anchoring owns the scroll position, and this effect would fight it by
+    // scrolling back to the ViewModel's last known position.
+    LaunchedEffect(
+        uiState.visiblePageIndex,
+        uiState.scrollOffsetPx,
+        uiState.pageCount,
+        uiState.gestureActive,
+    ) {
+        if (uiState.gestureActive) return@LaunchedEffect
         if (uiState.pageCount > 0 && listState.firstVisibleItemIndex != uiState.visiblePageIndex) {
             listState.scrollToItem(uiState.visiblePageIndex, uiState.scrollOffsetPx)
         }
@@ -116,7 +127,6 @@ fun PdfViewerScreen(
                         pageCount = uiState.pageCount,
                         zoom = uiState.zoom,
                         panX = uiState.panX,
-                        panY = uiState.panY,
                         viewportWidthPx = viewportWidthPx,
                         handle = handle,
                         cache = cache,
@@ -151,10 +161,9 @@ private fun Modifier.zoomInput(viewModel: PdfViewerViewModel): Modifier = this
                     previousPair?.let { previous ->
                         val delta = gestureDelta(previous, currentPair)
                         viewModel.onZoomChanged(viewModel.uiState.value.zoom * delta.zoomChange)
-                        viewModel.onPanChanged(
-                            viewModel.uiState.value.panX + delta.panX,
-                            viewModel.uiState.value.panY + delta.panY,
-                        )
+                        // The vertical midpoint drift is dropped: the list scroll
+                        // owns the vertical axis (D-06).
+                        viewModel.onPanChanged(viewModel.uiState.value.panX + delta.panX)
                     }
                     previousPair = currentPair
                     event.changes.forEach { it.consume() }
@@ -179,7 +188,6 @@ private fun PdfPageItem(
     pageCount: Int,
     zoom: Float,
     panX: Float,
-    panY: Float,
     viewportWidthPx: Int,
     handle: DocumentHandle?,
     cache: PageBitmapCache,
@@ -203,7 +211,6 @@ private fun PdfPageItem(
     // live bucket: during a gesture the live zoom has moved on while the bitmap
     // has not been re-rendered yet.
     val renderedBucket = rendered?.bucket ?: liveBucket
-    val renderedZoom = renderedZoomForBucket(renderedBucket)
 
     // Debounced re-render on zoom settle (D-09, T-03-03): never render per-frame.
     LaunchedEffect(zoom) {
@@ -248,11 +255,12 @@ private fun PdfPageItem(
         }
     }
 
-    // The box is sized from the RENDERED bucket, so it is exactly the size the
-    // bitmap was rendered at and the Image fills it 1:1 — ContentScale.FillBounds
-    // can never stretch the page.
-    val display = remember(transform, renderedZoom) {
-        transform?.renderedSize(renderedZoom)
+    // The slot follows the LIVE zoom: the drawn page is scaled to exactly fill
+    // it, so the slot and the page are always the same size. Sizing the slot
+    // from the rendered bucket instead left the page drawn smaller (dark
+    // margins) or larger (overlapping the next page) than the slot holding it.
+    val display = remember(transform, zoom) {
+        transform?.renderedSize(zoom)
     }
 
     // Re-render only when the pinch has settled (D-09): renderTick increments
@@ -278,16 +286,18 @@ private fun PdfPageItem(
     // Fallback (letter) aspect until the page size loads, so layout never jumps to zero.
     val fallbackAspect = 792f / 612f
     val widthDp = with(LocalDensity.current) {
-        ((display?.widthPx ?: (viewportWidthPx * renderedZoom).roundToInt())
+        ((display?.widthPx ?: (viewportWidthPx * zoom).roundToInt())
             .coerceAtLeast(1)).toDp()
     }
     val heightDp = with(LocalDensity.current) {
-        ((display?.heightPx ?: (viewportWidthPx * renderedZoom * fallbackAspect).roundToInt())
+        ((display?.heightPx ?: (viewportWidthPx * zoom * fallbackAspect).roundToInt())
             .coerceAtLeast(1)).toDp()
     }
 
     Box(
-        contentAlignment = Alignment.Center,
+        // The page is anchored to the TOP of its slot: the scale origin is the
+        // top-centre, so a top-aligned page grows downwards into the slot.
+        contentAlignment = Alignment.TopCenter,
         modifier = modifier
             .width(widthDp)
             .height(heightDp),
@@ -306,19 +316,28 @@ private fun PdfPageItem(
                 contentDescription = "Page ${pageIndex + 1} of $pageCount",
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier
-                    .fillMaxSize()
+                    // Laid out at the BITMAP's own pixel size, so the painter
+                    // draws it 1:1 and ContentScale.FillBounds can never stretch
+                    // the page. `requiredSize` ignores the slot's constraints:
+                    // the bitmap can be larger than the slot while the live
+                    // zoom is still below the bucket it was rendered at.
+                    .requiredSize(
+                        width = with(LocalDensity.current) { current.width.toDp() },
+                        height = with(LocalDensity.current) { current.height.toDp() },
+                    )
                     .graphicsLayer {
-                        // Uniform scale of the bitmap we actually have. The live zoom is a
-                        // transform on top of the rendered page - never a re-layout - so the
-                        // page is never stretched and never jumps at a bucket boundary.
+                        // The single uniform zoom factor: the live zoom over the
+                        // bucket the bitmap was actually rendered at. One value
+                        // for both axes - an unequal pair is an aspect-ratio
+                        // stretch.
                         val scale = uniformDisplayScale(zoom, renderedBucket)
                         scaleX = scale
                         scaleY = scale
                         transformOrigin = TransformOrigin(0.5f, 0f)
                         // Two-finger drag pans the zoomed page (D-07: pan lives in
-                        // the ViewModel so it survives rotation).
+                        // the ViewModel so it survives rotation). The vertical
+                        // axis belongs to the list scroll (D-06).
                         translationX = panX
-                        translationY = panY
                     }
                     .semantics { contentDescription = "Page ${pageIndex + 1} of $pageCount" },
             )

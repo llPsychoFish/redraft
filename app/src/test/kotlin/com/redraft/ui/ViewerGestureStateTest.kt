@@ -2,10 +2,17 @@ package com.redraft.ui
 
 import com.redraft.data.RecentFile
 import com.redraft.data.RecentsStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -15,7 +22,20 @@ import org.junit.Test
  * vertical pan at all, and a `gestureActive` flag tells the screen when the
  * gesture - not the scroll restore - owns the scroll position.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ViewerGestureStateTest {
+
+    private val dispatcher = StandardTestDispatcher()
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(dispatcher)
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
 
     private class FakeRecents : RecentsStore {
         override val recents: Flow<List<RecentFile>> = flowOf(emptyList())
