@@ -70,20 +70,10 @@ fun PageOverviewRoute(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val handle by viewModel.handle.collectAsStateWithLifecycle()
 
-    // The viewer is torn down while the overview is on top and rebuilt when
-    // the overview is left, so the reader's position has to be re-issued as a
-    // command - otherwise returning from the overview drops them back on
-    // page 1. A page tap is NOT a return: it has already commanded the page
-    // the reader asked for, and must not be overwritten.
-    var pageSelected by remember { mutableStateOf(false) }
-    DisposableEffect(viewModel) {
-        onDispose {
-            if (!pageSelected) {
-                viewModel.onScrollCommanded(viewModel.uiState.value.visiblePageIndex)
-            }
-        }
-    }
-
+    // Leaving the overview WITHOUT tapping a page must not emit a scroll
+    // command. The viewer's own position is restored by its saveable list
+    // state, and a command would additionally reset the reader to the TOP of
+    // the page, throwing away the offset they had scrolled to within it.
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
@@ -104,7 +94,6 @@ fun PageOverviewRoute(
             handle = handle,
             pageCount = uiState.pageCount,
             onPageSelected = { pageIndex ->
-                pageSelected = true
                 onPageSelected(pageIndex)
             },
             modifier = Modifier
