@@ -185,13 +185,25 @@ private fun PdfPageItem(
     cache: PageBitmapCache,
     modifier: Modifier = Modifier,
 ) {
-    val bucket = scaleBucketForZoom(zoom)
-    val key = PageKey(pageIndex, bucket)
-    val bucketZoom = Z_00_SCALE_BUCKETS[bucket]
+    // Where the LIVE zoom would render.
+    val liveBucket = scaleBucketForZoom(zoom)
 
-    var bitmap by remember(pageIndex, bucket) { mutableStateOf(cache.acquire(key)) }
+    // The page as it is actually rendered. The bucket lags the live zoom during
+    // a gesture: a re-render only happens once the pinch settles, so crossing a
+    // bucket boundary must NOT drop the bitmap (that blanked the page to the
+    // grey placeholder mid-pinch).
+    var rendered by remember(pageIndex, handle) {
+        val cached = cache.acquire(PageKey(pageIndex, liveBucket))
+        mutableStateOf(cached?.let { RenderedPage(it, liveBucket) })
+    }
     var pageSize by remember(pageIndex) { mutableStateOf<PdfPageSize?>(null) }
     var renderTick by remember { mutableIntStateOf(0) }
+
+    // The bucket the bitmap on screen was actually rendered at. This is NOT the
+    // live bucket: during a gesture the live zoom has moved on while the bitmap
+    // has not been re-rendered yet.
+    val renderedBucket = rendered?.bucket ?: liveBucket
+    val renderedZoom = renderedZoomForBucket(renderedBucket)
 
     // Debounced re-render on zoom settle (D-09, T-03-03): never render per-frame.
     LaunchedEffect(zoom) {
@@ -203,8 +215,9 @@ private fun PdfPageItem(
     // the same key, and the claim must follow the bitmap that was drawn. The
     // claim is what stops the cache from recycling a bitmap that is on screen
     // (threat T-03-02).
-    DisposableEffect(bitmap) {
-        val drawn = bitmap
+    val drawnBitmap = rendered?.bitmap
+    DisposableEffect(drawnBitmap) {
+        val drawn = drawnBitmap
         if (drawn != null) cache.retainDisplay(drawn)
         onDispose { if (drawn != null) cache.releaseDisplay(drawn) }
     }
@@ -235,28 +248,41 @@ private fun PdfPageItem(
         }
     }
 
-    val display = transform?.renderedSize(bucketZoom)
+    // The box is sized from the RENDERED bucket, so it is exactly the size the
+    // bitmap was rendered at and the Image fills it 1:1 — ContentScale.FillBounds
+    // can never stretch the page.
+    val display = remember(transform, renderedZoom) {
+        transform?.renderedSize(renderedZoom)
+    }
 
-    LaunchedEffect(handle, bitmap, key, renderTick, display?.widthPx, display?.heightPx) {
-        val current = bitmap
-        if (current != null || handle == null) return@LaunchedEffect
-        val dimensions = display ?: return@LaunchedEffect
+    // Re-render only when the pinch has settled (D-09): renderTick increments
+    // 250 ms after the zoom stops moving. The bucket is read at that moment, so
+    // a mid-gesture bucket crossing never triggers a render.
+    //
+    // `rendered` is deliberately NOT an effect key: setting it must not
+    // re-trigger the effect (the guard below already handles the no-op case).
+    LaunchedEffect(handle, pageIndex, renderTick, transform) {
+        val current = handle ?: return@LaunchedEffect
+        val target = scaleBucketForZoom(zoom)
+        if (rendered?.bucket == target) return@LaunchedEffect
+        val dimensions = transform?.renderedSize(renderedZoomForBucket(target))
+            ?: return@LaunchedEffect
         if (dimensions.widthPx <= 0 || dimensions.heightPx <= 0) return@LaunchedEffect
-        val rendered = withContext(Dispatchers.IO) {
-            handle.renderPage(pageIndex, dimensions.widthPx, dimensions.heightPx)
+        val renderedBitmap = withContext(Dispatchers.IO) {
+            current.renderPage(pageIndex, dimensions.widthPx, dimensions.heightPx)
         }
-        cache.put(key, rendered)
-        bitmap = rendered
+        cache.put(PageKey(pageIndex, target), renderedBitmap)
+        rendered = RenderedPage(renderedBitmap, target)
     }
 
     // Fallback (letter) aspect until the page size loads, so layout never jumps to zero.
     val fallbackAspect = 792f / 612f
     val widthDp = with(LocalDensity.current) {
-        ((display?.widthPx ?: (viewportWidthPx * bucketZoom).roundToInt())
+        ((display?.widthPx ?: (viewportWidthPx * renderedZoom).roundToInt())
             .coerceAtLeast(1)).toDp()
     }
     val heightDp = with(LocalDensity.current) {
-        ((display?.heightPx ?: (viewportWidthPx * bucketZoom * fallbackAspect).roundToInt())
+        ((display?.heightPx ?: (viewportWidthPx * renderedZoom * fallbackAspect).roundToInt())
             .coerceAtLeast(1)).toDp()
     }
 
@@ -266,7 +292,7 @@ private fun PdfPageItem(
             .width(widthDp)
             .height(heightDp),
     ) {
-        val current = bitmap
+        val current = drawnBitmap
         if (current == null) {
             // Placeholder is a flat surfaceVariant rectangle at final size — never blank (D-09).
             Box(
@@ -282,8 +308,10 @@ private fun PdfPageItem(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer {
-                        // Live-scale the cached bitmap during a pinch, relative to its bucket.
-                        val scale = zoom / bucketZoom
+                        // Uniform scale of the bitmap we actually have. The live zoom is a
+                        // transform on top of the rendered page - never a re-layout - so the
+                        // page is never stretched and never jumps at a bucket boundary.
+                        val scale = uniformDisplayScale(zoom, renderedBucket)
                         scaleX = scale
                         scaleY = scale
                         transformOrigin = TransformOrigin(0.5f, 0f)
