@@ -22,6 +22,7 @@ import com.redraft.ui.PdfViewerViewModel
 fun ViewerRoute(
     viewModel: PdfViewerViewModel,
     onBack: () -> Unit,
+    onOpenOverview: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -42,6 +43,14 @@ fun ViewerRoute(
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
                             contentDescription = "Back",
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = onOpenOverview) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_grid_view),
+                            contentDescription = "Page overview",
                         )
                     }
                 },

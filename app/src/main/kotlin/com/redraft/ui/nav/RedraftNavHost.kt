@@ -9,10 +9,12 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.home.HomeScreen
+import com.redraft.ui.overview.PageOverviewRoute
 import com.redraft.ui.viewer.ViewerRoute
 
 const val ROUTE_HOME = "home"
 const val ROUTE_VIEWER = "viewer"
+const val ROUTE_OVERVIEW = "overview"
 
 @Composable
 fun RedraftNavHost(modifier: Modifier = Modifier) {
@@ -35,6 +37,17 @@ fun RedraftNavHost(modifier: Modifier = Modifier) {
             ViewerRoute(
                 viewModel = viewModel,
                 onBack = { navController.popBackStack() },
+                onOpenOverview = { navController.navigate(ROUTE_OVERVIEW) },
+            )
+        }
+        composable(ROUTE_OVERVIEW) {
+            PageOverviewRoute(
+                viewModel = viewModel,
+                onBack = { navController.popBackStack() },
+                onPageSelected = { pageIndex ->
+                    viewModel.onScrollCommanded(pageIndex)
+                    navController.popBackStack()
+                },
             )
         }
     }
