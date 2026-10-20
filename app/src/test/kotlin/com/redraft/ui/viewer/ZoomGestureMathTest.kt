@@ -58,4 +58,36 @@ class ZoomGestureMathTest {
         val delta = gestureDelta(previous, current)
         Assert.assertEquals(2f, delta.zoomChange, TOLERANCE)
     }
+
+    // The focal point: the midpoint of the CURRENT touch pair. The pinch
+    // anchors the scroll on it so the content stays under the fingers.
+    @Test
+    fun `focal point is the midpoint of the current pair`() {
+        val previous = TouchPair(0f, 0f, 100f, 0f)
+        val current = TouchPair(0f, 0f, 200f, 0f)
+        val delta = gestureDelta(previous, current)
+        Assert.assertEquals(100f, delta.focalX, TOLERANCE)
+        Assert.assertEquals(0f, delta.focalY, TOLERANCE)
+    }
+
+    @Test
+    fun `focal point follows the fingers`() {
+        val previous = TouchPair(0f, 0f, 200f, 0f)
+        val current = TouchPair(50f, 50f, 150f, 50f)
+        val delta = gestureDelta(previous, current)
+        Assert.assertEquals(100f, delta.focalX, TOLERANCE)
+        Assert.assertEquals(50f, delta.focalY, TOLERANCE)
+    }
+
+    @Test
+    fun `pan is the midpoint drift and the focal point is the current midpoint`() {
+        val previous = TouchPair(0f, 0f, 100f, 0f)
+        val current = TouchPair(20f, 30f, 120f, 30f)
+        val delta = gestureDelta(previous, current)
+        // The midpoint moved from 50 to 70 in x and from 0 to 30 in y.
+        Assert.assertEquals(20f, delta.panX, TOLERANCE)
+        Assert.assertEquals(30f, delta.panY, TOLERANCE)
+        Assert.assertEquals(70f, delta.focalX, TOLERANCE)
+        Assert.assertEquals(30f, delta.focalY, TOLERANCE)
+    }
 }
