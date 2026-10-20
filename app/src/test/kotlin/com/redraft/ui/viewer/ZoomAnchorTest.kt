@@ -177,7 +177,7 @@ class ZoomAnchorTest {
     fun `a pan above the upper bound is clamped to the upper bound`() {
         // The page's right end is reachable: the page can be dragged to the
         // right until its right edge meets the viewport's right edge.
-        assertEquals(1000f, clampPanX(1f, 1000f, 3f), TOLERANCE)
+        assertEquals(1000f, clampPanX(1500f, 1000f, 3f), TOLERANCE)
         assertEquals(1000f, clampPanX(99999f, 1000f, 3f), TOLERANCE)
     }
 

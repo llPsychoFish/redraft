@@ -48,16 +48,27 @@ fun anchorScrollOffset(
 /**
  * The range the horizontal pan may take for a zoomed page.
  *
- * The page is laid out at `viewportWidthPx * zoom`, so it is wider than the
- * viewport as soon as `zoom > 1` and starts at the LEFT edge of the content.
- * It can therefore be dragged LEFT to reveal its far end - by exactly the
- * amount it overflows the viewport - and no further. It can never be dragged
- * to the right of its left edge.
+ * The page is drawn CENTRED in the viewport, and it is wider than the
+ * viewport as soon as `zoom > 1`:
+ *
+ *  - the LazyColumn bounds an item's WIDTH to the viewport width, so the
+ *    page item's slot is exactly the viewport wide;
+ *  - the page bitmap is laid out with `requiredSize`, which ignores that
+ *    constraint, so the image is wider than its slot;
+ *  - the image is placed with `contentAlignment = Alignment.TopCenter`
+ *    (centred in the slot) and then scaled by the `graphicsLayer` about its
+ *    own top-centre, which is the viewport's centre.
+ *
+ * So the page overflows the viewport by `(W * zoom - W) / 2` on EACH side,
+ * and the pan has to be able to reach both ends - and no further, or a gap
+ * opens on the opposite side.
  *
  * At `zoom == 1` the page fits the viewport and the range is empty.
  */
-fun panBounds(viewportWidthPx: Float, zoom: Float): ClosedFloatingPointRange<Float> =
-    (viewportWidthPx * (1f - zoom))..0f
+fun panBounds(viewportWidthPx: Float, zoom: Float): ClosedFloatingPointRange<Float> {
+    val halfOverflow = viewportWidthPx * (zoom - 1f) / 2f
+    return -halfOverflow..halfOverflow
+}
 
 /**
  * The horizontal pan, clamped to the content bounds.
