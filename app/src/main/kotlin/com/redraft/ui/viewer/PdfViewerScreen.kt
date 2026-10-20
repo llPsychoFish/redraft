@@ -4,7 +4,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -113,7 +113,21 @@ fun PdfViewerScreen(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .zoomInput(viewModel),
+                    .zoomInput(viewModel, listState, viewportWidthPx)
+                    .singlePointerDoubleTap {
+                        val current = viewModel.uiState.value.zoom
+                        val target = if (current > 1.2f) 1f else 2f
+                        viewModel.onZoomChanged(target)
+                        // At fit-width there is no horizontal room: re-clamp the pan
+                        // so no offset is left over from the zoomed state.
+                        viewModel.onPanChanged(
+                            clampPanX(
+                                viewModel.uiState.value.panX,
+                                viewportWidthPx.toFloat(),
+                                target,
+                            ),
+                        )
+                    },
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -138,7 +152,11 @@ fun PdfViewerScreen(
     }
 }
 
-private fun Modifier.zoomInput(viewModel: PdfViewerViewModel): Modifier = this
+private fun Modifier.zoomInput(
+    viewModel: PdfViewerViewModel,
+    listState: LazyListState,
+    viewportWidthPx: Int,
+): Modifier = this
     .pointerInput(Unit) {
         // Custom multi-touch handler (gap G-01-5): detectTransformGestures never reached
         // multi-touch mode because the LazyColumn's own scroll detector consumed the
@@ -147,39 +165,78 @@ private fun Modifier.zoomInput(viewModel: PdfViewerViewModel): Modifier = this
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false)
             var previousPair: TouchPair? = null
-            while (true) {
-                val event = awaitPointerEvent()
-                val pressed = event.changes.filter { it.pressed }
-                if (pressed.isEmpty()) break
-                if (pressed.size >= 2) {
-                    val currentPair = TouchPair(
-                        pressed[0].position.x,
-                        pressed[0].position.y,
-                        pressed[1].position.x,
-                        pressed[1].position.y,
-                    )
-                    previousPair?.let { previous ->
-                        val delta = gestureDelta(previous, currentPair)
-                        viewModel.onZoomChanged(viewModel.uiState.value.zoom * delta.zoomChange)
-                        // The vertical midpoint drift is dropped: the list scroll
-                        // owns the vertical axis (D-06).
-                        viewModel.onPanChanged(viewModel.uiState.value.panX + delta.panX)
+            try {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val pressed = event.changes.filter { it.pressed }
+                    if (pressed.isEmpty()) break
+                    if (pressed.size >= 2) {
+                        // The gesture owns the scroll position from here on: the
+                        // scroll-restore effect must not fight the focal anchoring.
+                        viewModel.onGestureActiveChanged(true)
+                        val currentPair = TouchPair(
+                            pressed[0].position.x,
+                            pressed[0].position.y,
+                            pressed[1].position.x,
+                            pressed[1].position.y,
+                        )
+                        previousPair?.let { previous ->
+                            val delta = gestureDelta(previous, currentPair)
+                            val before = viewModel.uiState.value.zoom
+                            val after = nextZoom(before, delta.zoomChange)
+                            val k = if (before > 0f) after / before else 1f
+
+                            // Re-anchor the scroll on the focal point so the content
+                            // under the fingers does not move. requestScrollToItem is
+                            // applied in the NEXT layout pass, so it must be requested
+                            // in the same frame as the zoom change - otherwise the
+                            // content visibly slides for one frame and then snaps back.
+                            //
+                            // `focalY` is in the viewer's local pixel space and
+                            // `item.offset` is the item's top in the viewport, also in
+                            // local pixels: the LazyColumn fills the viewport, so the
+                            // two spaces coincide.
+                            val focalY = delta.focalY
+                            val focalItem = listState.layoutInfo.visibleItemsInfo.firstOrNull { item ->
+                                focalY >= item.offset && focalY < item.offset + item.size
+                            }
+                            if (focalItem != null) {
+                                listState.requestScrollToItem(
+                                    index = focalItem.index,
+                                    scrollOffset = anchorScrollOffset(
+                                        focalY = focalY,
+                                        itemOffset = focalItem.offset,
+                                        itemSize = focalItem.size,
+                                        k = k,
+                                    ),
+                                )
+                            }
+
+                            viewModel.onZoomChanged(after)
+
+                            // The horizontal midpoint drift, clamped to the content
+                            // bounds so the page cannot walk off-centre. The vertical
+                            // drift is dropped: the list scroll owns that axis (D-06).
+                            val pan = viewModel.uiState.value.panX + delta.panX
+                            viewModel.onPanChanged(
+                                clampPanX(pan, viewportWidthPx.toFloat(), after),
+                            )
+                        }
+                        previousPair = currentPair
+                        event.changes.forEach { it.consume() }
+                    } else {
+                        // Single pointer: leave the event unconsumed so the LazyColumn keeps
+                        // scrolling (paging) instead of zooming.
+                        previousPair = null
                     }
-                    previousPair = currentPair
-                    event.changes.forEach { it.consume() }
-                } else {
-                    // Single pointer: leave the event unconsumed so the LazyColumn keeps
-                    // scrolling (paging) instead of zooming.
-                    previousPair = null
                 }
+            } finally {
+                // ALWAYS clear the flag, including when the gesture is cancelled
+                // mid-pinch: a flag stuck at true would disable the scroll restore
+                // for the rest of the session and lose the position on rotation.
+                viewModel.onGestureActiveChanged(false)
             }
         }
-    }
-    .pointerInput(Unit) {
-        detectTapGestures(onDoubleTap = {
-            val current = viewModel.uiState.value.zoom
-            viewModel.onZoomChanged(if (current > 1.2f) 1f else 2f)
-        })
     }
 
 @Composable
