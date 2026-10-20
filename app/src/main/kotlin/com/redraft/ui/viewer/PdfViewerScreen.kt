@@ -44,7 +44,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
 import com.redraft.pdfcore.PdfPageSize
 import com.redraft.pdfcore.PdfViewportTransform
+import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
@@ -165,7 +167,13 @@ private fun Modifier.zoomInput(
         // second pointer-down first. Here we track the two pressed pointers ourselves
         // and only consume once both are down, leaving single-finger drags to the list.
         awaitEachGesture {
-            awaitFirstDown(requireUnconsumed = false)
+            val down = awaitFirstDown(requireUnconsumed = false)
+            val downPosition = down.position
+            val pointerId = down.id
+            // The horizontal-pan mode is decided ONCE per gesture: a drag that
+            // changes direction halfway through must not flip modes.
+            var horizontalDrag = false
+            var lastPanDx = 0f
             var previousPair: TouchPair? = null
             try {
                 while (true) {
@@ -173,6 +181,10 @@ private fun Modifier.zoomInput(
                     val pressed = event.changes.filter { it.pressed }
                     if (pressed.isEmpty()) break
                     if (pressed.size >= 2) {
+                        // The pinch takes over: the leftover horizontal state must
+                        // not be applied later.
+                        horizontalDrag = false
+                        lastPanDx = 0f
                         // The gesture owns the scroll position from here on: the
                         // scroll-restore effect must not fight the focal anchoring.
                         viewModel.onGestureActiveChanged(true)
@@ -227,9 +239,48 @@ private fun Modifier.zoomInput(
                         previousPair = currentPair
                         event.changes.forEach { it.consume() }
                     } else {
-                        // Single pointer: leave the event unconsumed so the LazyColumn keeps
-                        // scrolling (paging) instead of zooming.
+                        // Single pointer.
+                        //
+                        // A predominantly HORIZONTAL drag pans the zoomed page: a
+                        // page wider than the screen has a far end that nothing
+                        // else can reach (the two-finger midpoint drift is not a
+                        // usable way to pan it).
+                        //
+                        // A VERTICAL drag is left completely unconsumed so the
+                        // LazyColumn keeps paging. The decision is made once, when
+                        // the touch slop is first exceeded, so a drag never changes
+                        // direction halfway through.
                         previousPair = null
+                        val zoom = viewModel.uiState.value.zoom
+                        if (zoom > MIN_ZOOM) {
+                            val change = event.changes.firstOrNull { it.id == pointerId }
+                                ?: event.changes.first()
+                            val dx = change.position.x - downPosition.x
+                            val dy = change.position.y - downPosition.y
+                            if (!horizontalDrag) {
+                                if (abs(dx) > viewConfiguration.touchSlop &&
+                                    abs(dx) > abs(dy)
+                                ) {
+                                    horizontalDrag = true
+                                    // The pan is incremental: the delta applied from
+                                    // now on is the CHANGE since the last frame, so
+                                    // the page does not jump by the whole drag
+                                    // distance on the first panned frame.
+                                    lastPanDx = dx
+                                    // Take over the gesture: stop the list from scrolling.
+                                    change.consume()
+                                }
+                            } else {
+                                // Already panning: apply the horizontal delta and keep the
+                                // gesture away from the list scroll.
+                                change.consume()
+                                val pan = viewModel.uiState.value.panX + dx - lastPanDx
+                                lastPanDx = dx
+                                viewModel.onPanChanged(
+                                    clampPanX(pan, viewportWidthPx.toFloat(), zoom),
+                                )
+                            }
+                        }
                     }
                 }
             } finally {
