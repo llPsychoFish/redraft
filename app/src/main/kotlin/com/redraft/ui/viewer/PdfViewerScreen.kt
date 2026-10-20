@@ -273,12 +273,24 @@ private fun Modifier.zoomInput(
                             } else {
                                 // Already panning: apply the horizontal delta and keep the
                                 // gesture away from the list scroll.
-                                change.consume()
-                                val pan = viewModel.uiState.value.panX + dx - lastPanDx
+                                //
+                                // At a boundary the page cannot move any further in this
+                                // direction, so the gesture is RELEASED instead of
+                                // swallowed: the change is not consumed, the pan stays
+                                // where it is, and the LazyColumn's own detector can
+                                // take the gesture back. Consuming it unconditionally
+                                // would lock the user into a horizontal drag that does
+                                // nothing.
+                                val requested = viewModel.uiState.value.panX + dx - lastPanDx
+                                val clamped = clampPanX(requested, viewportWidthPx.toFloat(), zoom)
+                                if (panWouldMove(requested, viewportWidthPx.toFloat(), zoom)) {
+                                    change.consume()
+                                    viewModel.onPanChanged(clamped)
+                                }
+                                // The delta is tracked either way, so that reversing
+                                // direction at a boundary resumes the pan on the very
+                                // next frame without a jump.
                                 lastPanDx = dx
-                                viewModel.onPanChanged(
-                                    clampPanX(pan, viewportWidthPx.toFloat(), zoom),
-                                )
                             }
                         }
                     }
