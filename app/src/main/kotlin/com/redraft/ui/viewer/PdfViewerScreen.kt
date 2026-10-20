@@ -79,11 +79,22 @@ fun PdfViewerScreen(
     // The gesture guard defers a command that arrives while a pinch is
     // running: the focal anchoring owns the scroll position then. The effect
     // re-runs when the gesture flag clears, so the command is applied after.
+    //
+    // A command is applied EXACTLY once and then consumed. A LaunchedEffect
+    // body re-runs on every re-composition, so a command that was never
+    // cleared would be re-applied whenever the viewer is rebuilt - a rotation,
+    // or a return from the page overview - overriding the saveable list state
+    // and dropping the reader back to the commanded page.
+    //
+    // The order matters: apply FIRST, consume AFTERWARDS. If the effect is
+    // cancelled between the two, the command survives and is applied later -
+    // losing a jump is worse than applying one twice.
     LaunchedEffect(uiState.scrollCommand, uiState.gestureActive) {
         val command = uiState.scrollCommand ?: return@LaunchedEffect
         if (uiState.gestureActive) return@LaunchedEffect
         if (command.pageIndex !in 0 until uiState.pageCount) return@LaunchedEffect
         listState.scrollToItem(command.pageIndex, command.offsetPx)
+        viewModel.onScrollCommandConsumed(command.token)
     }
 
     // Mirror the scroll position into the ViewModel. This is a MIRROR, not a
