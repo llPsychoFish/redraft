@@ -33,6 +33,18 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
+/**
+ * A one-shot request to move the list to a page.
+ *
+ * The token makes every command distinct, so two commands to the SAME page
+ * in a row are two commands and not one.
+ */
+data class ScrollCommand(
+    val pageIndex: Int,
+    val offsetPx: Int = 0,
+    val token: Long = 0L,
+)
+
 data class ViewerUiState(
     val documentName: String? = null,
     val pageCount: Int = 0,
@@ -46,6 +58,11 @@ data class ViewerUiState(
     // True while a pinch gesture owns the scroll position. The scroll-restore
     // effect must not fight the focal anchoring while it is set (D-06, D-07).
     val gestureActive: Boolean = false,
+    // A one-shot command to move the list. ONLY this may move the list - the
+    // visiblePageIndex / scrollOffsetPx pair is a MIRROR of the list's own
+    // position and must never drive it (during a fling the mirror lags a frame
+    // behind, and restoring from it cancels the fling).
+    val scrollCommand: ScrollCommand? = null,
 )
 
 const val MIN_ZOOM = 1f
@@ -115,6 +132,22 @@ class PdfViewerViewModel(
         }
     }
 
+    /**
+     * Command the list to a page. The token increments on every command so
+     * that repeating the same command still fires.
+     */
+    fun onScrollCommanded(pageIndex: Int, offsetPx: Int = 0) {
+        _uiState.update { state ->
+            state.copy(
+                scrollCommand = ScrollCommand(
+                    pageIndex = pageIndex.coerceIn(0, (state.pageCount - 1).coerceAtLeast(0)),
+                    offsetPx = offsetPx,
+                    token = (state.scrollCommand?.token ?: 0L) + 1L,
+                ),
+            )
+        }
+    }
+
     private fun openInternal(uri: String, knownDisplayName: String?) {
         viewModelScope.launch {
             openMutex.withLock {
@@ -141,6 +174,14 @@ class PdfViewerViewModel(
                                 scrollOffsetPx = 0,
                                 panX = 0f,
                                 pageSizes = emptyList(),
+                                // A new document starts at its first page - by a
+                                // COMMAND, not by the mirror: the mirror never
+                                // moves the list.
+                                scrollCommand = ScrollCommand(
+                                    pageIndex = 0,
+                                    offsetPx = 0,
+                                    token = (it.scrollCommand?.token ?: 0L) + 1L,
+                                ),
                             )
                         }
                         recentsRepository.addOrUpdate(
