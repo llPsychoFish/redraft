@@ -42,6 +42,9 @@ class ThumbnailCache(maxBytes: Long = 12L * 1024 * 1024) {
     fun releaseDisplay(bitmap: Bitmap) = cache.releaseDisplay(bitmap)
 
     fun recycleAll() = cache.recycleAll()
+
+    /** The total byte size of every thumbnail the LRU currently holds. */
+    val sizeBytes: Long get() = cache.sizeBytes
 }
 
 /**

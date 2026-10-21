@@ -1,6 +1,5 @@
 package com.redraft
 
-import android.os.Build
 import android.os.Bundle
 import android.os.StrictMode
 import androidx.activity.ComponentActivity
@@ -9,6 +8,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.redraft.ui.nav.RedraftNavHost
+import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.theme.RedraftTheme
 
@@ -32,13 +32,17 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(this))
+            val pdfViewerViewModel: PdfViewerViewModel = viewModel(factory = PdfViewerViewModel.factory(this))
             val settings = settingsViewModel.settings.collectAsStateWithLifecycle()
             RedraftTheme(
                 themeMode = settings.value.themeMode,
                 dynamicColor = settings.value.dynamicColor,
                 amoled = settings.value.amoled,
             ) {
-                RedraftNavHost()
+                RedraftNavHost(
+                    settingsViewModel = settingsViewModel,
+                    pdfViewerViewModel = pdfViewerViewModel,
+                )
             }
         }
     }

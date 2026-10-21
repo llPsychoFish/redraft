@@ -11,18 +11,25 @@ import androidx.navigation.compose.rememberNavController
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.home.HomeScreen
 import com.redraft.ui.overview.PageOverviewRoute
+import com.redraft.ui.settings.SettingsScreen
+import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.viewer.ViewerRoute
 import kotlinx.coroutines.launch
 
 const val ROUTE_HOME = "home"
 const val ROUTE_VIEWER = "viewer"
 const val ROUTE_OVERVIEW = "overview"
+const val ROUTE_SETTINGS = "settings"
 
 @Composable
-fun RedraftNavHost(modifier: Modifier = Modifier) {
+fun RedraftNavHost(
+    modifier: Modifier = Modifier,
+    settingsViewModel: SettingsViewModel,
+    pdfViewerViewModel: PdfViewerViewModel,
+) {
     val navController = rememberNavController()
     val context = LocalContext.current
-    val viewModel: PdfViewerViewModel = viewModel(factory = PdfViewerViewModel.factory(context))
+    val viewModel: PdfViewerViewModel = pdfViewerViewModel
     val scope = rememberCoroutineScope()
 
     NavHost(
@@ -33,12 +40,15 @@ fun RedraftNavHost(modifier: Modifier = Modifier) {
         composable(ROUTE_HOME) {
             HomeScreen(
                 viewModel = viewModel,
+                settingsViewModel = settingsViewModel,
                 onDocumentOpened = { navController.navigate(ROUTE_VIEWER) },
+                onOpenSettings = { navController.navigate(ROUTE_SETTINGS) },
             )
         }
         composable(ROUTE_VIEWER) {
             ViewerRoute(
                 viewModel = viewModel,
+                settingsViewModel = settingsViewModel,
                 onBack = { navController.popBackStack() },
                 onOpenOverview = { navController.navigate(ROUTE_OVERVIEW) },
             )
@@ -49,11 +59,15 @@ fun RedraftNavHost(modifier: Modifier = Modifier) {
                 onBack = { navController.popBackStack() },
                 onPageSelected = { pageIndex ->
                     viewModel.onScrollCommanded(pageIndex)
-                    // Pop back to the VIEWER specifically, never off the top of the
-                    // stack: a bare popBackStack() would close the document if it
-                    // were ever called twice.
                     scope.launch { navController.popBackStack(ROUTE_VIEWER, inclusive = false) }
                 },
+            )
+        }
+        composable(ROUTE_SETTINGS) {
+            SettingsScreen(
+                settingsViewModel = settingsViewModel,
+                pdfViewerViewModel = viewModel,
+                onBack = { navController.popBackStack() },
             )
         }
     }

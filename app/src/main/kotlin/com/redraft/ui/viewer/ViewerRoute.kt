@@ -16,11 +16,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.R
 import com.redraft.ui.PdfViewerViewModel
+import com.redraft.ui.settings.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewerRoute(
     viewModel: PdfViewerViewModel,
+    settingsViewModel: SettingsViewModel,
     onBack: () -> Unit,
     onOpenOverview: () -> Unit,
     modifier: Modifier = Modifier,
@@ -59,6 +61,7 @@ fun ViewerRoute(
     ) { padding ->
         PdfViewerScreen(
             viewModel = viewModel,
+            settingsViewModel = settingsViewModel,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),

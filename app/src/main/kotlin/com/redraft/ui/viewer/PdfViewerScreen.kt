@@ -46,6 +46,7 @@ import com.redraft.pdfcore.PdfPageSize
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
+import com.redraft.ui.settings.SettingsViewModel
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,7 @@ private const val DEBOUNCE_MS = 250L
 @Composable
 fun PdfViewerScreen(
     viewModel: PdfViewerViewModel,
+    settingsViewModel: SettingsViewModel,
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()

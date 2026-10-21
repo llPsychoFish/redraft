@@ -13,8 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CenterAlignedTopAppBar
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
@@ -44,12 +42,15 @@ import com.redraft.data.DocumentError
 import com.redraft.data.RecentFile
 import com.redraft.data.SafDocumentOpener
 import com.redraft.ui.PdfViewerViewModel
+import com.redraft.ui.settings.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     viewModel: PdfViewerViewModel,
+    settingsViewModel: SettingsViewModel,
     onDocumentOpened: () -> Unit,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -79,7 +80,19 @@ fun HomeScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = { CenterAlignedTopAppBar(title = { Text("Redraft") }) },
+        topBar = {
+            CenterAlignedTopAppBar(
+                title = { Text("Redraft") },
+                actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_settings),
+                            contentDescription = "Settings",
+                        )
+                    }
+                },
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             ExtendedFloatingActionButton(
@@ -174,11 +187,11 @@ private fun RecentItem(
                     contentDescription = "More options",
                 )
             }
-            DropdownMenu(
+            androidx.compose.material3.DropdownMenu(
                 expanded = menuExpanded,
                 onDismissRequest = { menuExpanded = false },
             ) {
-                DropdownMenuItem(
+                androidx.compose.material3.DropdownMenuItem(
                     text = { Text("Remove from recents") },
                     onClick = {
                         menuExpanded = false
