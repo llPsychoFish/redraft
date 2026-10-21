@@ -38,6 +38,23 @@ interface SettingsStore {
     suspend fun setReopenAtLastPage(enabled: Boolean)
 }
 
+// Pure, Android-free decode function — unit-testable (D-12)
+fun decodeSettings(preferences: Preferences): AppSettings {
+    val themeModeName = preferences[KEY_THEME_MODE] ?: ThemeMode.SYSTEM.name
+    val themeMode = try {
+        ThemeMode.valueOf(themeModeName)
+    } catch (e: IllegalArgumentException) {
+        ThemeMode.SYSTEM
+    }
+    return AppSettings(
+        themeMode = themeMode,
+        dynamicColor = preferences[KEY_DYNAMIC_COLOR] ?: true,
+        amoled = preferences[KEY_AMOLED] ?: false,
+        keepScreenOn = preferences[KEY_KEEP_SCREEN_ON] ?: false,
+        reopenAtLastPage = preferences[KEY_REOPEN_AT_LAST_PAGE] ?: true,
+    )
+}
+
 class SettingsRepository(
     private val dataStore: DataStore<Preferences>,
 ) : SettingsStore {
@@ -48,17 +65,7 @@ class SettingsRepository(
         .catch { cause ->
             if (cause is IOException) emit(emptyPreferences()) else throw cause
         }
-        .map { preferences ->
-            val themeModeName = preferences[KEY_THEME_MODE] ?: ThemeMode.SYSTEM.name
-            val themeMode = ThemeMode.valueOf(themeModeName)
-            AppSettings(
-                themeMode = themeMode,
-                dynamicColor = preferences[KEY_DYNAMIC_COLOR] ?: true,
-                amoled = preferences[KEY_AMOLED] ?: false,
-                keepScreenOn = preferences[KEY_KEEP_SCREEN_ON] ?: false,
-                reopenAtLastPage = preferences[KEY_REOPEN_AT_LAST_PAGE] ?: true,
-            )
-        }
+        .map { preferences -> decodeSettings(preferences) }
         .stateIn(
             kotlinx.coroutines.CoroutineScope(SupervisorJob() + Dispatchers.IO),
             SharingStarted.Eagerly,
