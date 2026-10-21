@@ -1,6 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. Compose provides all in-app styling (UI-SPEC: Material 3 defaults). -->
-    <style name="Base.Theme.Redraft" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Base.Theme.Redraft" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/redraft_window_background_light</item>
+    </style>
 
     <style name="Theme.Redraft" parent="Base.Theme.Redraft" />
 </resources>

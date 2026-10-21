@@ -1,0 +1,8 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Night theme with dark window background to avoid white flash (D-07, UI-03) -->
+    <style name="Base.Theme.Redraft" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/redraft_window_background_dark</item>
+    </style>
+
+    <style name="Theme.Redraft" parent="Base.Theme.Redraft" />
+</resources>
