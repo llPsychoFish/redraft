@@ -163,7 +163,7 @@ private fun DynamicColorSwitch(settings: AppSettings, viewModel: SettingsViewMod
             .toggleable(value = settings.dynamicColor, onValueChange = { viewModel.setDynamicColor(it) })
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Text(text = "Dynamic colour", style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth())
+        Text(text = "Dynamic colour", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         Switch(checked = settings.dynamicColor, onCheckedChange = null)
     }
 }
@@ -177,7 +177,7 @@ private fun AmoledSwitch(settings: AppSettings, viewModel: SettingsViewModel) {
             .toggleable(value = settings.amoled, onValueChange = { if (!disabled) viewModel.setAmoled(it) })
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Text(text = "AMOLED black", style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth())
+        Text(text = "AMOLED black", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         Switch(checked = settings.amoled, onCheckedChange = null, enabled = !disabled)
     }
 }
@@ -190,7 +190,7 @@ private fun KeepScreenOnSwitch(settings: AppSettings, viewModel: SettingsViewMod
             .toggleable(value = settings.keepScreenOn, onValueChange = { viewModel.setKeepScreenOn(it) })
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Text(text = "Keep screen on while reading", style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth())
+        Text(text = "Keep screen on while reading", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         Switch(checked = settings.keepScreenOn, onCheckedChange = null)
     }
 }
@@ -203,7 +203,7 @@ private fun ReopenAtLastPageSwitch(settings: AppSettings, viewModel: SettingsVie
             .toggleable(value = settings.reopenAtLastPage, onValueChange = { viewModel.setReopenAtLastPage(it) })
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        Text(text = "Reopen at the last page", style = MaterialTheme.typography.titleMedium, modifier = Modifier.fillMaxWidth())
+        Text(text = "Reopen at the last page", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         Switch(checked = settings.reopenAtLastPage, onCheckedChange = null)
     }
 }
