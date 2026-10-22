@@ -64,12 +64,10 @@ fun PdfViewerScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val handle by viewModel.handle.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    val cache = remember { PageBitmapCache() }
-
-    // Recycle every cached bitmap when the document changes or the viewer leaves composition.
-    DisposableEffect(handle) {
-        onDispose { cache.recycleAll() }
-    }
+    // The cache is OWNED by the ViewModel, not by this composition: leaving the viewer to open
+    // the page overview must not throw away every rendered page, and recycling happens in
+    // PdfViewerViewModel.closeDocument() when the document is actually closed (A-1, A-2).
+    val cache = viewModel.pageBitmapCache
 
     // Apply a scroll COMMAND. This is the ONLY thing that may move the list.
     //

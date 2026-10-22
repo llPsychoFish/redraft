@@ -98,6 +98,9 @@ fun PageOverviewRoute(
         PageOverviewGrid(
             handle = handle,
             pageCount = uiState.pageCount,
+            // Thumbnails are owned by the ViewModel so leaving the grid does not discard them,
+            // and a full-resolution page bitmap can never be evicted by a thumbnail (A-1).
+            cache = viewModel.thumbnailCache,
             onPageSelected = { pageIndex ->
                 if (selectionHandled) return@PageOverviewGrid
                 selectionHandled = true
@@ -115,14 +118,9 @@ private fun PageOverviewGrid(
     handle: DocumentHandle?,
     pageCount: Int,
     onPageSelected: (Int) -> Unit,
+    cache: ThumbnailCache,
     modifier: Modifier = Modifier,
 ) {
-    // The thumbnails have their own cache with their own budget: a grid of
-    // thumbnails must never evict the full-resolution page bitmaps.
-    val cache = remember { ThumbnailCache() }
-    DisposableEffect(cache) {
-        onDispose { cache.recycleAll() }
-    }
 
     // The page sizes are fetched ONCE, off the main thread. They are needed
     // for each page's aspect ratio, and the aspect ratio is what gives a
