@@ -5,8 +5,8 @@ import org.junit.Test
 
 class RecentFilesRepositoryTest {
 
-    private fun file(uri: String, name: String = uri, ts: Long = 0L) =
-        RecentFile(uri = uri, displayName = name, lastOpenedEpochMs = ts)
+    private fun file(uri: String, name: String = uri, ts: Long = 0L, page: Int = 0) =
+        RecentFile(uri = uri, displayName = name, lastOpenedEpochMs = ts, lastPageIndex = page)
 
     @Test
     fun upsert_adds_new_entry() {
@@ -23,6 +23,21 @@ class RecentFilesRepositoryTest {
 
         assertEquals(2, result.size)
         assertEquals("new", result.first { it.uri == "a" }.displayName)
+    }
+
+    @Test
+    fun upsert_carries_the_last_page_forward() {
+        val existing = listOf(file("a", ts = 1, page = 7), file("b", ts = 2))
+
+        val result = existing.upsert(file("a", ts = 3, page = 9))
+
+        assertEquals(9, result.first { it.uri == "a" }.lastPageIndex)
+        assertEquals(0, result.first { it.uri == "b" }.lastPageIndex)
+    }
+
+    @Test
+    fun a_record_without_a_page_defaults_to_the_first_page() {
+        assertEquals(0, file("a").lastPageIndex)
     }
 
     @Test

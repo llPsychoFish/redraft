@@ -14,6 +14,8 @@ import com.redraft.data.RecentFilesRepository
 import com.redraft.data.RecentsStore
 import com.redraft.data.SafDocumentOpener
 import com.redraft.pdfcore.PdfPageSize
+import com.redraft.ui.viewer.PageBitmapCache
+import com.redraft.ui.overview.ThumbnailCache
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +28,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -58,6 +61,9 @@ data class ViewerUiState(
     // True while a pinch gesture owns the scroll position. The scroll-restore
     // effect must not fight the focal anchoring while it is set (D-06, D-07).
     val gestureActive: Boolean = false,
+    // True until the first recent-files emission arrives from DataStore.
+    // HomeScreen uses this to suppress the empty-state flicker on cold start.
+    val isLoadingRecents: Boolean = true,
     // A one-shot command to move the list. ONLY this may move the list - the
     // visiblePageIndex / scrollOffsetPx pair is a MIRROR of the list's own
     // position and must never drive it (during a fling the mirror lags a frame
@@ -77,6 +83,9 @@ class PdfViewerViewModel(
     private val clock: () -> Long = System::currentTimeMillis,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val cleanupScope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
+    // Cache ownership (A-1) — single instance per ViewModel
+    val pageBitmapCache: PageBitmapCache = PageBitmapCache(),
+    val thumbnailCache: ThumbnailCache = ThumbnailCache(),
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ViewerUiState())
@@ -89,17 +98,28 @@ class PdfViewerViewModel(
     val documentOpened: SharedFlow<Unit> = _documentOpened.asSharedFlow()
 
     val recents: StateFlow<List<RecentFile>> = recentsRepository.recents
+        .onEach { _uiState.update { it.copy(isLoadingRecents = false) } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    // Cache size (A-3) — null = not yet measured
+    private val _cacheSizeBytes = MutableStateFlow<Long?>(null)
+    val cacheSizeBytes: StateFlow<Long?> = _cacheSizeBytes
 
     private val openMutex = Mutex()
     private var currentHandle: DocumentHandle? = null
+    private var currentUri: String? = null
+    private var lastPersistedPage: Int? = null
 
     fun open(uri: String) {
         openInternal(uri = uri, knownDisplayName = null)
     }
 
-    fun openRecent(file: RecentFile) {
-        openInternal(uri = file.uri, knownDisplayName = file.displayName)
+    /**
+     * Opens a recent document. [startPage] is the page to land on — Home passes the stored
+     * [RecentFile.lastPageIndex] only while "Reopen at the last page" is enabled.
+     */
+    fun openRecent(file: RecentFile, startPage: Int = 0) {
+        openInternal(uri = file.uri, knownDisplayName = file.displayName, startPage = startPage)
     }
 
     fun clearError() {
@@ -108,6 +128,11 @@ class PdfViewerViewModel(
 
     fun removeRecent(file: RecentFile) {
         viewModelScope.launch { recentsRepository.remove(file.uri) }
+    }
+
+    /** Empties the recent-files list only — the documents themselves are untouched. */
+    fun clearRecents() {
+        viewModelScope.launch { recentsRepository.clear() }
     }
 
     fun onZoomChanged(zoom: Float) {
@@ -124,12 +149,24 @@ class PdfViewerViewModel(
     }
 
     fun onScroll(visiblePageIndex: Int, offsetPx: Int) {
+        var landedPage = 0
         _uiState.update {
+            landedPage = visiblePageIndex.coerceIn(0, (it.pageCount - 1).coerceAtLeast(0))
             it.copy(
-                visiblePageIndex = visiblePageIndex.coerceIn(0, (it.pageCount - 1).coerceAtLeast(0)),
+                visiblePageIndex = landedPage,
                 scrollOffsetPx = offsetPx,
             )
         }
+        rememberPage(landedPage)
+    }
+
+    // The page is persisted only when it actually changes: the mirror emits on every pixel of a
+    // scroll, and a DataStore write per frame would be absurd.
+    private fun rememberPage(pageIndex: Int) {
+        val uri = currentUri ?: return
+        if (pageIndex == lastPersistedPage) return
+        lastPersistedPage = pageIndex
+        viewModelScope.launch { recentsRepository.updateLastPage(uri, pageIndex) }
     }
 
     /**
@@ -166,75 +203,104 @@ class PdfViewerViewModel(
         }
     }
 
-    private fun openInternal(uri: String, knownDisplayName: String?) {
+    // Cache management (A-3)
+    fun refreshCacheSize() {
+        viewModelScope.launch {
+            val total = pageBitmapCache.sizeBytes + thumbnailCache.sizeBytes
+            _cacheSizeBytes.value = total
+        }
+    }
+
+    fun clearCaches() {
+        pageBitmapCache.recycleAll()
+        thumbnailCache.recycleAll()
+        _cacheSizeBytes.value = 0L
+    }
+
+    // Document lifecycle (A-2) — single place for cache recycle + handle close
+    fun closeDocument() {
+        val handle = currentHandle ?: return
+        currentHandle = null
+        currentUri = null
+        lastPersistedPage = null
+        _handle.value = null
+        // Recycle both caches when document is closed
+        pageBitmapCache.recycleAll()
+        thumbnailCache.recycleAll()
+        cleanupScope.launch(NonCancellable) { handle.close() }
+    }
+
+    private fun openInternal(uri: String, knownDisplayName: String?, startPage: Int = 0) {
         viewModelScope.launch {
             openMutex.withLock {
                 _uiState.update { it.copy(isLoading = true, error = null) }
+                closeDocument()
                 withContext(ioDispatcher) {
-                    currentHandle?.close()
-                }
-                currentHandle = null
-                _handle.value = null
-
-                openDocument(uri).fold(
-                    onSuccess = { opened ->
-                        currentHandle = opened
-                        _handle.value = opened
-                        val name = knownDisplayName ?: resolveDisplayName(uri)
-                        _uiState.update {
-                            it.copy(
-                                documentName = name,
-                                pageCount = opened.pageCount,
-                                isLoading = false,
-                                error = null,
-                                zoom = 1f,
-                                visiblePageIndex = 0,
-                                scrollOffsetPx = 0,
-                                panX = 0f,
-                                pageSizes = emptyList(),
-                                // A new document starts at its first page - by a
-                                // COMMAND, not by the mirror: the mirror never
-                                // moves the list.
-                                scrollCommand = ScrollCommand(
-                                    pageIndex = 0,
-                                    offsetPx = 0,
-                                    token = (it.scrollCommand?.token ?: 0L) + 1L,
+                    openDocument(uri).fold(
+                        onSuccess = { opened ->
+                            currentHandle = opened
+                            _handle.value = opened
+                            currentUri = uri
+                            val name = knownDisplayName ?: resolveDisplayName(uri)
+                            val targetPage = startPage.coerceIn(0, (opened.pageCount - 1).coerceAtLeast(0))
+                            lastPersistedPage = targetPage
+                            _uiState.update {
+                                it.copy(
+                                    documentName = name,
+                                    pageCount = opened.pageCount,
+                                    isLoading = false,
+                                    error = null,
+                                    zoom = 1f,
+                                    visiblePageIndex = 0,
+                                    scrollOffsetPx = 0,
+                                    panX = 0f,
+                                    pageSizes = emptyList(),
+                                    // A new document starts at its first page - or at the stored
+                                    // page when "Reopen at the last page" is on - by a COMMAND,
+                                    // not by the mirror: the mirror never moves the list.
+                                    scrollCommand = ScrollCommand(
+                                        pageIndex = targetPage,
+                                        offsetPx = 0,
+                                        token = (it.scrollCommand?.token ?: 0L) + 1L,
+                                    ),
+                                )
+                            }
+                            recentsRepository.addOrUpdate(
+                                RecentFile(
+                                    uri = uri,
+                                    displayName = name,
+                                    lastOpenedEpochMs = clock(),
+                                    lastPageIndex = targetPage,
                                 ),
                             )
-                        }
-                        recentsRepository.addOrUpdate(
-                            RecentFile(uri = uri, displayName = name, lastOpenedEpochMs = clock()),
-                        )
-                        _documentOpened.tryEmit(Unit)
-                    },
-                    onFailure = { throwable ->
-                        _uiState.update {
-                            it.copy(
-                                documentName = null,
-                                pageCount = 0,
-                                isLoading = false,
-                                error = throwable.toDocumentError(),
-                                zoom = 1f,
-                                visiblePageIndex = 0,
-                                scrollOffsetPx = 0,
-                                panX = 0f,
-                                pageSizes = emptyList(),
-                            )
-                        }
-                        if (knownDisplayName != null) {
-                            recentsRepository.remove(uri)
-                        }
-                    },
-                )
+                            _documentOpened.tryEmit(Unit)
+                        },
+                        onFailure = { throwable ->
+                            _uiState.update {
+                                it.copy(
+                                    documentName = null,
+                                    pageCount = 0,
+                                    isLoading = false,
+                                    error = throwable.toDocumentError(),
+                                    zoom = 1f,
+                                    visiblePageIndex = 0,
+                                    scrollOffsetPx = 0,
+                                    panX = 0f,
+                                    pageSizes = emptyList(),
+                                )
+                            }
+                            if (knownDisplayName != null) {
+                                recentsRepository.remove(uri)
+                            }
+                        },
+                    )
+                }
             }
         }
     }
 
     override fun onCleared() {
-        val handle = currentHandle ?: return
-        currentHandle = null
-        _handle.value = null
-        cleanupScope.launch(NonCancellable) { handle.close() }
+        closeDocument()
     }
 
     companion object {

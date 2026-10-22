@@ -1,0 +1,45 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group>
+        <path
+            android:fillColor="#FF000000"
+            android:fillType="evenOdd"
+            android:pathData="M37.36,27.5 L62.18,27.5 L73.06,38.38 L73.06,80.54 L34.98,80.54 L34.98,27.5 Z M62.18,27.5 L62.18,38.38 L73.06,38.38 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M40.93,43.82 L54.87,43.82 L54.87,46.2 L40.93,46.2 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M40.93,49.26 L60.31,49.26 L60.31,51.64 L40.93,51.64 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M40.93,74.76 L50.79,74.76 L50.79,77.14 L40.93,77.14 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M41.78,56.06 L66.26,56.06 L66.26,70.34 L41.78,70.34 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M43.48,57.76 L64.56,57.76 L64.56,68.64 L43.48,68.64 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M44.84,61.84 L59.12,61.84 L59.12,64.56 L44.84,64.56 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M62.18,59.8 L63.88,59.8 L63.88,66.6 L62.18,66.6 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M38.38,53.34 L41.1,53.34 L41.1,56.06 L38.38,56.06 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M66.94,53.34 L69.66,53.34 L69.66,56.06 L66.94,56.06 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M38.38,67.62 L41.1,67.62 L41.1,70.34 L38.38,70.34 Z" />
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M66.94,67.62 L69.66,67.62 L69.66,70.34 L66.94,70.34 Z" />
+    </group>
+</vector>

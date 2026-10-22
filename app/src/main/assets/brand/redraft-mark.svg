@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Redraft mark</title>
+  <g>
+    <path fill-rule="evenodd" d="M158 100 L304 100 L368 164 L368 412 L144 412 L144 100 Z M304 100 L304 164 L368 164 Z" fill="#F2F2F4"/>
+    <path d="M179 196 L261 196 L261 210 L179 210 Z" fill="#FFFFFF"/>
+    <path d="M179 228 L293 228 L293 242 L179 242 Z" fill="#FFFFFF"/>
+    <path d="M179 378 L237 378 L237 392 L179 392 Z" fill="#FFFFFF"/>
+    <path d="M184 268 L328 268 L328 352 L184 352 Z" fill="#FFB000"/>
+    <path d="M194 278 L318 278 L318 342 L194 342 Z" fill="#F2F2F4"/>
+    <path d="M202 302 L286 302 L286 318 L202 318 Z" fill="#0B0C10"/>
+    <path d="M304 290 L314 290 L314 330 L304 330 Z" fill="#FFB000"/>
+    <path d="M164 252 L180 252 L180 268 L164 268 Z" fill="#FFB000"/>
+    <path d="M332 252 L348 252 L348 268 L332 268 Z" fill="#FFB000"/>
+    <path d="M164 336 L180 336 L180 352 L164 352 Z" fill="#FFB000"/>
+    <path d="M332 336 L348 336 L348 352 L332 352 Z" fill="#FFB000"/>
+  </g>
+</svg>

@@ -48,9 +48,14 @@ class PdfViewerViewModelTest {
     private class FakeRecents : RecentsStore {
         private val state = MutableStateFlow<List<RecentFile>>(emptyList())
         val removed = mutableListOf<String>()
+        val pageUpdates = mutableListOf<Pair<String, Int>>()
         override val recents = state
         override suspend fun addOrUpdate(file: RecentFile) {
             state.value = state.value.upsert(file)
+        }
+
+        override suspend fun updateLastPage(uri: String, pageIndex: Int) {
+            pageUpdates += uri to pageIndex
         }
 
         override suspend fun remove(uri: String) {
@@ -97,6 +102,38 @@ class PdfViewerViewModelTest {
         ioDispatcher = dispatcher,
         cleanupScope = CoroutineScope(SupervisorJob() + dispatcher),
     )
+
+    @Test
+    fun openRecent_with_a_stored_page_commands_that_page() = runTest(dispatcher) {
+        val recents = FakeRecents()
+        val vm = viewModel(recents) { Result.success(FakeHandle(10, "doc", mutableListOf())) }
+
+        vm.openRecent(
+            RecentFile(uri = "uri", displayName = "doc", lastOpenedEpochMs = 0L, lastPageIndex = 4),
+            startPage = 4,
+        )
+        advanceUntilIdle()
+
+        // The page is applied by a COMMAND; the mirror only follows once the list reports back.
+        assertEquals(4, vm.uiState.value.scrollCommand?.pageIndex)
+        assertEquals(4, recents.recents.value.single().lastPageIndex)
+    }
+
+    @Test
+    fun scrolling_persists_the_page_once_per_change() = runTest(dispatcher) {
+        val recents = FakeRecents()
+        val vm = viewModel(recents) { Result.success(FakeHandle(10, "doc", mutableListOf())) }
+        vm.open("uri")
+        advanceUntilIdle()
+
+        vm.onScroll(visiblePageIndex = 3, offsetPx = 0)
+        vm.onScroll(visiblePageIndex = 3, offsetPx = 120)
+        advanceUntilIdle()
+        vm.onScroll(visiblePageIndex = 5, offsetPx = 0)
+        advanceUntilIdle()
+
+        assertEquals(listOf("uri" to 3, "uri" to 5), recents.pageUpdates)
+    }
 
     @Test
     fun opening_second_document_closes_first_before_opening_second() = runTest(dispatcher) {

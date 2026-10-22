@@ -47,7 +47,7 @@ class PdfDocumentHandle private constructor(
             PdfPageSize(
                 widthPt = it.getPageWidthPoint().toFloat(),
                 heightPt = it.getPageHeightPoint().toFloat(),
-                rotationDegrees = it.getPageRotation(),
+                rotationDegrees = it.getPageRotation() * 90,
             )
         }
     }

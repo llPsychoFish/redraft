@@ -2,4 +2,6 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+    <color name="redraft_window_background_light">#FFF2F2F4</color>
+    <color name="redraft_window_background_dark">#FF0B0C10</color>
 </resources>

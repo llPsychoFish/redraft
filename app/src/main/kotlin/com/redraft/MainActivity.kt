@@ -1,18 +1,16 @@
 package com.redraft
 
-import android.os.Build
 import android.os.Bundle
 import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.redraft.ui.nav.RedraftNavHost
+import com.redraft.ui.PdfViewerViewModel
+import com.redraft.ui.settings.SettingsViewModel
+import com.redraft.ui.theme.RedraftTheme
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -33,16 +31,18 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         setContent {
-            val darkTheme = isSystemInDarkTheme()
-            val colorScheme = when {
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-                    if (darkTheme) dynamicDarkColorScheme(this) else dynamicLightColorScheme(this)
-                }
-                darkTheme -> darkColorScheme()
-                else -> lightColorScheme()
-            }
-            MaterialTheme(colorScheme = colorScheme) {
-                RedraftNavHost()
+            val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(this))
+            val pdfViewerViewModel: PdfViewerViewModel = viewModel(factory = PdfViewerViewModel.factory(this))
+            val settings = settingsViewModel.settings.collectAsStateWithLifecycle()
+            RedraftTheme(
+                themeMode = settings.value.themeMode,
+                dynamicColor = settings.value.dynamicColor,
+                amoled = settings.value.amoled,
+            ) {
+                RedraftNavHost(
+                    settingsViewModel = settingsViewModel,
+                    pdfViewerViewModel = pdfViewerViewModel,
+                )
             }
         }
     }

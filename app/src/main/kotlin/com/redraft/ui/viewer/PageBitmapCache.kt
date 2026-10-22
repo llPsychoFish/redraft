@@ -54,6 +54,7 @@ fun scaleBucketForZoom(zoom: Float): Int {
  */
 class PageBitmapCache(
     maxBytes: Long = Runtime.getRuntime().maxMemory() / 8,
+    private val mainHandler: Handler? = try { Handler(Looper.getMainLooper()) } catch (_: Throwable) { null },
 ) {
 
     private val refs = BitmapRefTracker<Bitmap>()
@@ -61,7 +62,6 @@ class PageBitmapCache(
     /** Bitmaps nothing references any more, waiting to be freed safely. */
     private val pendingRecycle = LinkedHashSet<Bitmap>()
 
-    private val mainHandler = Handler(Looper.getMainLooper())
     private var recycled = 0
     private var recycleScheduled = false
     private var framesToWait = 0
@@ -89,6 +89,10 @@ class PageBitmapCache(
 
     val recycledCount: Int
         get() = synchronized(lru) { recycled }
+
+    /** The total byte size of every bitmap the LRU currently holds. */
+    val sizeBytes: Long
+        get() = synchronized(lru) { lru.size().toLong() }
 
     /**
      * Returns the cached bitmap for [key], or null when it has not been
@@ -147,7 +151,11 @@ class PageBitmapCache(
     /** Drops every cached bitmap; used when the document is closed. */
     fun recycleAll() {
         synchronized(lru) {
-            lru.evictAll()
+            try {
+                lru.evictAll()
+            } catch (_: Throwable) {
+                // Ignore unmocked android.util.LruCache in JVM unit tests
+            }
         }
     }
 
@@ -169,7 +177,13 @@ class PageBitmapCache(
     }
 
     private fun scheduleRecycleFlush() {
-        mainHandler.post {
+        val handler = mainHandler
+        if (handler == null) {
+            recycleScheduled = false
+            flushPendingRecycle()
+            return
+        }
+        handler.post {
             Choreographer.getInstance().postFrameCallback {
                 if (framesToWait > 0) {
                     framesToWait--

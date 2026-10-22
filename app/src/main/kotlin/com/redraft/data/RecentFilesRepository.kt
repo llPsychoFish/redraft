@@ -40,6 +40,13 @@ interface RecentsStore {
     suspend fun addOrUpdate(file: RecentFile)
     suspend fun remove(uri: String)
     suspend fun clear()
+
+    /**
+     * Records the page the reader is on for an already-listed document, without touching the
+     * timestamp (reading must not reorder the recents list). Stores that do not track pages keep
+     * this as a no-op.
+     */
+    suspend fun updateLastPage(uri: String, pageIndex: Int) = Unit
 }
 
 class RecentFilesRepository(
@@ -75,6 +82,17 @@ class RecentFilesRepository(
         dataStore.edit { preferences -> preferences.remove(RECENTS_JSON_KEY) }
     }
 
+    override suspend fun updateLastPage(uri: String, pageIndex: Int) {
+        dataStore.edit { preferences ->
+            val files = decode(preferences[RECENTS_JSON_KEY])
+            if (files.none { it.uri == uri }) return@edit
+            val updated = files.map {
+                if (it.uri == uri) it.copy(lastPageIndex = pageIndex.coerceAtLeast(0)) else it
+            }
+            preferences[RECENTS_JSON_KEY] = encode(updated)
+        }
+    }
+
     private fun encode(files: List<RecentFile>): String {
         val array = JSONArray()
         files.forEach { file ->
@@ -83,6 +101,7 @@ class RecentFilesRepository(
                     put(FIELD_URI, file.uri)
                     put(FIELD_NAME, file.displayName)
                     put(FIELD_TIMESTAMP, file.lastOpenedEpochMs)
+                    put(FIELD_LAST_PAGE, file.lastPageIndex)
                 },
             )
         }
@@ -101,6 +120,8 @@ class RecentFilesRepository(
                     uri = uri,
                     displayName = entry.optString(FIELD_NAME).takeIf { it.isNotEmpty() } ?: uri,
                     lastOpenedEpochMs = entry.optLong(FIELD_TIMESTAMP, 0L),
+                    // Absent in records written before page tracking existed: reopen at page 1.
+                    lastPageIndex = entry.optInt(FIELD_LAST_PAGE, 0).coerceAtLeast(0),
                 )
             }
         } catch (e: JSONException) {
@@ -112,5 +133,6 @@ class RecentFilesRepository(
         const val FIELD_URI = "uri"
         const val FIELD_NAME = "name"
         const val FIELD_TIMESTAMP = "ts"
+        const val FIELD_LAST_PAGE = "page"
     }
 }

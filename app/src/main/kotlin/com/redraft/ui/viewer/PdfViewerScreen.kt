@@ -1,5 +1,6 @@
 package com.redraft.ui.viewer
 
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -18,6 +19,7 @@ import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -30,10 +32,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -46,9 +51,11 @@ import com.redraft.pdfcore.PdfPageSize
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
+import com.redraft.ui.settings.SettingsViewModel
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 
@@ -57,17 +64,17 @@ private const val DEBOUNCE_MS = 250L
 @Composable
 fun PdfViewerScreen(
     viewModel: PdfViewerViewModel,
+    settingsViewModel: SettingsViewModel,
+    onSingleTap: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val handle by viewModel.handle.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
-    val cache = remember { PageBitmapCache() }
-
-    // Recycle every cached bitmap when the document changes or the viewer leaves composition.
-    DisposableEffect(handle) {
-        onDispose { cache.recycleAll() }
-    }
+    // The cache is OWNED by the ViewModel, not by this composition: leaving the viewer to open
+    // the page overview must not throw away every rendered page, and recycling happens in
+    // PdfViewerViewModel.closeDocument() when the document is actually closed (A-1, A-2).
+    val cache = viewModel.pageBitmapCache
 
     // Apply a scroll COMMAND. This is the ONLY thing that may move the list.
     //
@@ -130,7 +137,7 @@ fun PdfViewerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .zoomInput(viewModel, listState, viewportWidthPx)
-                    .singlePointerDoubleTap {
+                    .singlePointerDoubleTap(onSingleTap = onSingleTap) {
                         val current = viewModel.uiState.value.zoom
                         val target = if (current > 1.2f) 1f else 2f
                         viewModel.onZoomChanged(target)
@@ -164,6 +171,17 @@ fun PdfViewerScreen(
                     )
                 }
             }
+
+            // Auto-hiding page indicator: reveals on page change (or document open),
+            // fades out after 2 s. Overlaid — it never shifts page layout.
+            PageIndicatorPill(
+                visible = uiState.pageCount > 0,
+                pageIndex = uiState.visiblePageIndex,
+                pageCount = uiState.pageCount,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 24.dp),
+            )
         }
     }
 }
@@ -187,6 +205,8 @@ private fun Modifier.zoomInput(
             var horizontalDrag = false
             var lastPanDx = 0f
             var previousPair: TouchPair? = null
+            // Track the last known pointer position for incremental pan delta.
+            var lastPosition = downPosition
             try {
                 while (true) {
                     val event = awaitPointerEvent()
@@ -267,7 +287,9 @@ private fun Modifier.zoomInput(
                         if (zoom > MIN_ZOOM) {
                             val change = event.changes.firstOrNull { it.id == pointerId }
                                 ?: event.changes.first()
-                            val dx = change.position.x - downPosition.x
+                            // Track previous position for incremental delta.
+                            val dx = change.position.x - lastPosition.x
+                            lastPosition = change.position
                             val dy = change.position.y - downPosition.y
                             if (!horizontalDrag) {
                                 if (abs(dx) > viewConfiguration.touchSlop &&
@@ -315,6 +337,49 @@ private fun Modifier.zoomInput(
             }
         }
     }
+
+@Composable
+private fun PageIndicatorPill(
+    visible: Boolean,
+    pageIndex: Int,
+    pageCount: Int,
+    modifier: Modifier = Modifier,
+) {
+    var show by remember { mutableStateOf(false) }
+
+    // Reveal on page change or document open, then auto-hide. A closed document
+    // (pageCount == 0) must force-hide instead of returning early, or a pill left
+    // visible would freeze at "x / 0".
+    LaunchedEffect(pageIndex, pageCount) {
+        if (pageCount <= 0) {
+            show = false
+            return@LaunchedEffect
+        }
+        show = true
+        delay(2_000)
+        show = false
+    }
+
+    val alpha by animateFloatAsState(
+        targetValue = if (show && visible) 1f else 0f,
+        label = "pagePillAlpha",
+    )
+    // Drop the pill entirely at alpha ~0 so it holds no semantics while hidden.
+    if (alpha > 0.01f) {
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.92f),
+            modifier = modifier.graphicsLayer { this.alpha = alpha },
+        ) {
+            Text(
+                text = "${pageIndex + 1} / $pageCount",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            )
+        }
+    }
+}
 
 @Composable
 private fun PdfPageItem(
@@ -433,6 +498,10 @@ private fun PdfPageItem(
         // top-centre, so a top-aligned page grows downwards into the slot.
         contentAlignment = Alignment.TopCenter,
         modifier = modifier
+            // Soft drop shadow so each page reads as a sheet resting on the surface.
+            // clip = false is mandatory: the bitmap may exceed the slot mid-pinch,
+            // and clipping it to the slot bounds would crop the page.
+            .shadow(elevation = 2.dp, shape = RectangleShape, clip = false)
             .width(widthDp)
             .height(heightDp),
     ) {
