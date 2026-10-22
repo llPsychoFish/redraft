@@ -1,5 +1,10 @@
 package com.redraft.ui.nav
 
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -40,6 +45,22 @@ fun RedraftNavHost(
         navController = navController,
         startDestination = ROUTE_HOME,
         modifier = modifier,
+        enterTransition = {
+            fadeIn(animationSpec = tween(300)) +
+                slideInHorizontally(animationSpec = tween(300)) { it }
+        },
+        exitTransition = {
+            fadeOut(animationSpec = tween(300)) +
+                slideOutHorizontally(animationSpec = tween(300)) { -it }
+        },
+        popEnterTransition = {
+            fadeIn(animationSpec = tween(300)) +
+                slideInHorizontally(animationSpec = tween(300)) { -it }
+        },
+        popExitTransition = {
+            fadeOut(animationSpec = tween(300)) +
+                slideOutHorizontally(animationSpec = tween(300)) { it }
+        },
     ) {
         composable(ROUTE_HOME) {
             HomeScreen(
