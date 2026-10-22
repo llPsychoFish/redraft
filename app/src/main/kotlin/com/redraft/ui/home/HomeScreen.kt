@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -95,16 +96,20 @@ fun HomeScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                onClick = launchPicker,
-                icon = {
-                    Icon(
-                        painter = painterResource(R.drawable.ic_pdf),
-                        contentDescription = null,
-                    )
-                },
-                text = { Text("Open PDF") },
-            )
+            // The empty state carries the only "Open PDF" action while there is nothing to
+            // show, so the FAB would be a second button doing the same thing.
+            if (recents.isNotEmpty()) {
+                ExtendedFloatingActionButton(
+                    onClick = launchPicker,
+                    icon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_pdf),
+                            contentDescription = null,
+                        )
+                    },
+                    text = { Text("Open PDF") },
+                )
+            }
         },
     ) { padding ->
         if (recents.isEmpty()) {
@@ -124,7 +129,14 @@ fun HomeScreen(
                 )
                 Text(
                     text = "No recent PDFs yet",
+                    style = MaterialTheme.typography.titleLarge,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Open a PDF to get started. Files you open will appear here.",
                     style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
                 )
                 FilledTonalButton(onClick = launchPicker) {
                     Text("Open PDF")
@@ -175,9 +187,12 @@ private fun RecentItem(
             )
         },
         supportingContent = {
+            // Last-opened date is the metadata the UI contract asks for (file size or date).
             Text(
                 text = DateUtils.getRelativeTimeSpanString(file.lastOpenedEpochMs).toString(),
                 style = MaterialTheme.typography.bodyMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         },
         trailingContent = {
@@ -193,6 +208,13 @@ private fun RecentItem(
             ) {
                 androidx.compose.material3.DropdownMenuItem(
                     text = { Text("Remove from recents") },
+                    leadingIcon = {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_delete),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    },
                     onClick = {
                         menuExpanded = false
                         onRemove()
