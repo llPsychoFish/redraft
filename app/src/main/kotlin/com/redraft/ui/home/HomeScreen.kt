@@ -90,6 +90,7 @@ fun HomeScreen(
                         Icon(
                             painter = painterResource(R.drawable.ic_settings),
                             contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 },
@@ -116,7 +117,7 @@ fun HomeScreen(
         if (recents.isEmpty()) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
+                verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -125,17 +126,17 @@ fun HomeScreen(
                 Icon(
                     painter = painterResource(R.drawable.ic_pdf),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(72.dp),
                 )
                 Text(
                     text = "No recent PDFs yet",
-                    style = MaterialTheme.typography.titleLarge,
+                    style = MaterialTheme.typography.headlineMedium,
                     textAlign = TextAlign.Center,
                 )
                 Text(
                     text = "Open a PDF to get started. Files you open will appear here.",
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )

@@ -125,7 +125,7 @@ private fun SectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
     )
 }
 
@@ -213,8 +213,8 @@ private fun ClearRecentsButton(onClear: () -> Unit) {
     var confirming by remember { mutableStateOf(false) }
 
     ListItem(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable { confirming = true },
-        leadingContent = { Icon(painter = painterResource(R.drawable.ic_more_vert), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable { confirming = true },
+        leadingContent = { Icon(painter = painterResource(R.drawable.ic_storage), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent = { Text(text = "Clear list", style = MaterialTheme.typography.titleMedium) }
     )
 
@@ -244,8 +244,8 @@ private fun ClearRecentsButton(onClear: () -> Unit) {
 @Composable
 private fun ClearCacheButton(cacheSize: Long?, onClear: () -> Unit) {
     ListItem(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable(onClick = onClear),
-        leadingContent = { Icon(painter = painterResource(R.drawable.ic_more_vert), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = onClear),
+        leadingContent = { Icon(painter = painterResource(R.drawable.ic_storage), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent = { Text(text = "Clear cache", style = MaterialTheme.typography.titleMedium) },
         supportingContent = {
             Text(
@@ -259,7 +259,7 @@ private fun ClearCacheButton(cacheSize: Long?, onClear: () -> Unit) {
 @Composable
 private fun NavigationRow(title: String, onClick: () -> Unit) {
     ListItem(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = onClick),
         headlineContent = { Text(text = title, style = MaterialTheme.typography.titleMedium) },
         trailingContent = {
             Icon(
