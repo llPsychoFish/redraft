@@ -24,14 +24,22 @@ object SupportLinks {
 
     // TODO(developer): fill these in before release (developer decision, see 01.1-04 user_setup).
     // Until a URL is set, its row is omitted from the UI — never greyed out, never an error.
-    const val GITHUB_SPONSORS: String = ""
-    const val KO_FI: String = ""
+    const val GITHUB_SPONSORS: String = "https://github.com/sponsors/llPsychoFish"
     const val BUY_ME_A_COFFEE: String = ""
-    const val MOBILE_MONEY: String = ""
+    // TODO(developer): fill in the PayPal.me handle before release.
+    const val PAYPAL: String = ""
 
-    // TODO(developer): point these at the real repository before release.
-    const val SOURCE_CODE: String = ""
-    const val REPORT_ISSUE: String = ""
+    /**
+     * Raw Monero wallet address for crypto donations — a wallet address, NOT a URL, so it
+     * deliberately lives outside the [SupportLink]/[allowedHosts] model (T-01-05 only gates
+     * launched links). The Support screen copies it to the clipboard; while blank, the whole
+     * crypto section is omitted.
+     */
+    // TODO(developer): fill in the Monero address before release.
+    const val XMR_ADDRESS: String = ""
+
+    const val SOURCE_CODE: String = "https://github.com/llPsychoFish/redraft"
+    const val REPORT_ISSUE: String = "https://github.com/llPsychoFish/redraft/issues"
 
     /**
      * The complete host allow-list (T-01-05). Subdomains of a listed host are accepted, so
@@ -39,16 +47,15 @@ object SupportLinks {
      */
     val allowedHosts: Set<String> = setOf(
         "github.com",
-        "ko-fi.com",
         "buymeacoffee.com",
+        "paypal.me",
     )
 
     /** Support-screen targets, in display order. Blank URLs are filtered out by the screen. */
     val supportLinks: List<SupportLink> = listOf(
         SupportLink("GitHub Sponsors", GITHUB_SPONSORS),
-        SupportLink("Ko-fi", KO_FI),
         SupportLink("Buy Me a Coffee", BUY_ME_A_COFFEE),
-        SupportLink("Mobile Money", MOBILE_MONEY),
+        SupportLink("PayPal", PAYPAL),
     )
 
     /** About-screen link targets, in display order. */

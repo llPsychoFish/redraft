@@ -56,7 +56,7 @@ class SupportLinksTest {
     fun `allow-listed hosts and their subdomains are accepted`() {
         assertTrue(SupportLinks.isAllowed("https://github.com/redraft"))
         assertTrue(SupportLinks.isAllowed("https://gist.github.com/x"))
-        assertTrue(SupportLinks.isAllowed("https://ko-fi.com/redraft"))
+        assertTrue(SupportLinks.isAllowed("https://paypal.me/redraft"))
         assertTrue(SupportLinks.isAllowed("https://buymeacoffee.com/redraft"))
     }
 
@@ -70,7 +70,7 @@ class SupportLinksTest {
     fun `the configured support links keep display order`() {
         val labels = SupportLinks.supportLinks.map { it.label }
         assertEquals(
-            listOf("GitHub Sponsors", "Ko-fi", "Buy Me a Coffee", "Mobile Money"),
+            listOf("GitHub Sponsors", "Buy Me a Coffee", "PayPal"),
             labels,
         )
     }
