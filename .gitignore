@@ -14,5 +14,12 @@
 .cxx
 local.properties
 
+# Keystore files
+*.jks
+*.keystore
+*.p12
+keystore.properties
+signing/
+
 .planning/
 .agents/
