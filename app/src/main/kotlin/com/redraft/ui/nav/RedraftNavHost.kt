@@ -60,9 +60,7 @@ fun RedraftNavHost(
                 slideInHorizontally(animationSpec = tween(300)) { -it }
         },
         popExitTransition = {
-            // Symmetric to popEnterTransition: the viewer slides back out to the right.
-            fadeOut(animationSpec = tween(300)) +
-                slideOutHorizontally(animationSpec = tween(300)) { it }
+            fadeOut(animationSpec = tween(300))
         },
     ) {
         composable(ROUTE_HOME) {
