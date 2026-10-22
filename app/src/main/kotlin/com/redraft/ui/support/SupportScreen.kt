@@ -1,11 +1,14 @@
 package com.redraft.ui.support
 
+import android.content.ClipData
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -20,6 +23,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.ClipEntry
+import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
@@ -33,6 +39,7 @@ private const val SUPPORT_MESSAGE =
         "exactly the same either way."
 private const val NO_LINKS = "No support links are set up in this build."
 private const val LINK_ERROR = "Couldn't open the link. No app on this device can handle it."
+private const val ADDRESS_COPIED = "Address copied"
 
 /**
  * Support/donations surface. External links only: no billing library, no gating, no nagging
@@ -47,6 +54,7 @@ fun SupportScreen(
     val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboard.current
     val links = remember { SupportLinks.configured(SupportLinks.supportLinks) }
 
     Scaffold(
@@ -69,45 +77,142 @@ fun SupportScreen(
         LazyColumn(
             contentPadding = padding,
             modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                Text(
-                    text = SUPPORT_MESSAGE,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
-                )
-            }
-            if (links.isEmpty()) {
-                item {
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Text(
-                        text = NO_LINKS,
+                        text = SUPPORT_MESSAGE,
                         style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
                     )
                 }
-            } else {
-                items(count = links.size) { index ->
-                    val link = links[index]
-                    ListItem(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable {
-                                if (!openExternalLink(context, link.url)) {
-                                    scope.launch { snackbarHostState.showSnackbar(LINK_ERROR) }
-                                }
-                            },
-                        headlineContent = { Text(link.label) },
-                        trailingContent = {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_open_in_new),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            }
+
+            item { SectionHeader("Ways to support") }
+            item {
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    if (links.isEmpty()) {
+                        Text(
+                            text = NO_LINKS,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.fillMaxWidth().padding(16.dp),
+                        )
+                    } else {
+                        links.forEach { link ->
+                            val (iconRes, subtitle) = supportPresentation(link.label)
+                            ListItem(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (!openExternalLink(context, link.url)) {
+                                            scope.launch {
+                                                snackbarHostState.showSnackbar(LINK_ERROR)
+                                            }
+                                        }
+                                    },
+                                leadingContent = {
+                                    Icon(
+                                        painter = painterResource(iconRes),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(24.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                                headlineContent = {
+                                    Text(
+                                        text = link.label,
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
+                                },
+                                supportingContent = subtitle?.let { text ->
+                                    {
+                                        Text(
+                                            text = text,
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                },
+                                trailingContent = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_open_in_new),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
                             )
-                        },
-                    )
+                        }
+                    }
+                }
+            }
+
+            if (SupportLinks.XMR_ADDRESS.isNotBlank()) {
+                item { SectionHeader("Crypto") }
+                item {
+                    Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                        ListItem(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        clipboard.setClipEntry(
+                                            ClipEntry(
+                                                ClipData.newPlainText(
+                                                    "Monero address",
+                                                    SupportLinks.XMR_ADDRESS,
+                                                ),
+                                            ),
+                                        )
+                                        snackbarHostState.showSnackbar(ADDRESS_COPIED)
+                                    }
+                                },
+                            leadingContent = {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_currency_btc),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(24.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            },
+                            headlineContent = {
+                                Text(
+                                    text = "Monero (XMR)",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            },
+                            supportingContent = {
+                                Text(
+                                    text = SupportLinks.XMR_ADDRESS,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            },
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+/** Curated icon + subtitle per known platform; unmapped labels get a neutral icon and no subtitle. */
+private fun supportPresentation(label: String): Pair<Int, String?> = when (label) {
+    "GitHub Sponsors" -> R.drawable.ic_heart to "Recurring monthly support"
+    "Buy Me a Coffee" -> R.drawable.ic_coffee to "One-time tip"
+    "PayPal" -> R.drawable.ic_paypal to "One-time tip"
+    else -> R.drawable.ic_open_in_new to null
+}
+
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
+    )
 }
