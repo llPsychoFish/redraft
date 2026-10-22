@@ -3,6 +3,7 @@ package com.redraft.ui.about
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -169,10 +170,13 @@ fun AboutScreen(
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                             )
                         }
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
                             FeatureChip("Open source", R.drawable.ic_github)
                             FeatureChip("Offline-first", R.drawable.ic_cloud_off)
-                            FeatureChip("No tracking", R.drawable.ic_shield, maxLines = 1, softWrap = false)
+                            FeatureChip("No tracking", R.drawable.ic_shield)
                         }
                     }
                 }

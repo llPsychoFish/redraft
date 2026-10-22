@@ -44,26 +44,28 @@ fun RedraftNavHost(
     val viewModel: PdfViewerViewModel = pdfViewerViewModel
     val scope = rememberCoroutineScope()
 
-    NavHost(
-        navController = navController,
-        startDestination = ROUTE_HOME,
-        enterTransition = {
-            fadeIn(animationSpec = tween(250)) +
-                slideInHorizontally(animationSpec = tween(250)) { it }
-        },
-        exitTransition = {
-            fadeOut(animationSpec = tween(250)) +
-                slideOutHorizontally(animationSpec = tween(250)) { -it }
-        },
-        popEnterTransition = {
-            fadeIn(animationSpec = tween(250)) +
-                slideInHorizontally(animationSpec = tween(250)) { -it }
-        },
-        popExitTransition = {
-            fadeOut(animationSpec = tween(250)) +
-                slideOutHorizontally(animationSpec = tween(250)) { it }
-        },
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        modifier = modifier.fillMaxSize(),
     ) {
+        NavHost(
+            navController = navController,
+            startDestination = ROUTE_HOME,
+            enterTransition = {
+                slideInHorizontally(animationSpec = tween(300)) { it } +
+                    fadeIn(animationSpec = tween(150))
+            },
+            exitTransition = {
+                slideOutHorizontally(animationSpec = tween(300)) { -it / 3 } +
+                    fadeOut(animationSpec = tween(300))
+            },
+            popEnterTransition = {
+                slideInHorizontally(animationSpec = tween(300)) { -it / 4 }
+            },
+            popExitTransition = {
+                slideOutHorizontally(animationSpec = tween(300)) { it / 4 }
+            },
+        ) {
         composable(ROUTE_HOME) {
             HomeScreen(
                 viewModel = viewModel,
@@ -111,4 +113,5 @@ fun RedraftNavHost(
             )
         }
     }
+}
 }
