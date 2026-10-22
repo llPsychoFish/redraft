@@ -1,0 +1,11 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Android 12+ splash screen. The icon sits on the same brand window background as the
+         launch window, so the hand-off from splash to Compose has no colour jump (D-07, UI-03). -->
+    <style name="Base.Theme.Redraft" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/redraft_window_background_light</item>
+        <item name="android:windowSplashScreenBackground">@color/redraft_window_background_light</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/redraft_adaptive_foreground</item>
+    </style>
+
+    <style name="Theme.Redraft" parent="Base.Theme.Redraft" />
+</resources>
