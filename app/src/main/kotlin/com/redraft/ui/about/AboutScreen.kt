@@ -1,23 +1,20 @@
 package com.redraft.ui.about
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -37,15 +35,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.redraft.BuildConfig
 import com.redraft.R
 import com.redraft.ui.support.SupportLinks
 import com.redraft.ui.support.SupportLink
 import com.redraft.ui.support.openExternalLink
-import com.redraft.ui.theme.BrandAmber
 import kotlinx.coroutines.launch
 
 /**
@@ -94,6 +93,7 @@ fun AboutScreen(
     val links: List<SupportLink> = remember { SupportLinks.configured(SupportLinks.aboutLinks) }
     var showLicences by remember { mutableStateOf(false) }
     var showLicenceText by remember { mutableStateOf(false) }
+    var showPrivacy by remember { mutableStateOf(false) }
 
     val licenceText = remember {
         runCatching {
@@ -116,89 +116,136 @@ fun AboutScreen(
                 },
             )
         },
+        bottomBar = {
+            Button(
+                onClick = onSupport,
+                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                ),
+            ) {
+                Text("Support Redraft")
+            }
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         LazyColumn(
             contentPadding = padding,
             modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            item { IdentityBlock() }
-
-            links.forEach { link ->
-                item {
-                    ExternalLinkRow(link) {
-                        if (!openExternalLink(context, link.url)) {
-                            scope.launch { snackbarHostState.showSnackbar(LINK_ERROR) }
+            item {
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.redraft_icon),
+                            contentDescription = null,
+                            modifier = Modifier.size(48.dp),
+                            tint = Color.Unspecified,
+                        )
+                        Text(text = "Redraft", style = MaterialTheme.typography.headlineMedium)
+                        Text(
+                            text = DESCRIPTION,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Text(
+                            text = STATUS_LINE,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Surface(
+                            color = MaterialTheme.colorScheme.primaryContainer,
+                            shape = MaterialTheme.shapes.small,
+                        ) {
+                            Text(
+                                text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FeatureChip("Open source", R.drawable.ic_github)
+                            FeatureChip("Offline-first", R.drawable.ic_cloud_off)
+                            FeatureChip("No tracking", R.drawable.ic_shield)
                         }
                     }
                 }
             }
-            item {
-                ListItem(
-                    modifier = Modifier.fillMaxWidth().clickable { showLicences = true },
-                    headlineContent = { Text("Open-source licences") },
-                    trailingContent = { Chevron() },
-                )
-            }
-            item {
-                ListItem(
-                    modifier = Modifier.fillMaxWidth().clickable { showLicenceText = true },
-                    headlineContent = { Text("Licence") },
-                    trailingContent = { Chevron() },
-                )
-            }
 
-            item { SectionHeader("Privacy") }
+            item { SectionHeader("Links") }
             item {
-                Text(
-                    text = PRIVACY_1,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-            item {
-                Text(
-                    text = PRIVACY_2,
-                    style = MaterialTheme.typography.bodyLarge,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-
-            item { SectionHeader("Open-source licences") }
-            item {
-                Text(
-                    text = LICENCES_SUBTITLE,
-                    style = MaterialTheme.typography.bodyMedium,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                )
-            }
-            openSourceNotices.forEach { notice ->
-                item {
-                    ListItem(
-                        modifier = Modifier.fillMaxWidth(),
-                        headlineContent = { Text(notice.library) },
-                        supportingContent = { Text(notice.licence) },
-                    )
+                Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                    Column {
+                        ListItem(
+                            modifier = Modifier.fillMaxWidth().clickable { showLicences = true },
+                            leadingContent = { LeadingIcon(R.drawable.ic_article) },
+                            headlineContent = {
+                                Text(
+                                    text = "Open-source licences",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                            },
+                            trailingContent = { Chevron() },
+                        )
+                        ListItem(
+                            modifier = Modifier.fillMaxWidth().clickable { showLicenceText = true },
+                            leadingContent = { LeadingIcon(R.drawable.ic_gavel) },
+                            headlineContent = {
+                                Text(text = "Licence", style = MaterialTheme.typography.titleMedium)
+                            },
+                            trailingContent = { Chevron() },
+                        )
+                        ListItem(
+                            modifier = Modifier.fillMaxWidth().clickable { showPrivacy = true },
+                            leadingContent = { LeadingIcon(R.drawable.ic_shield) },
+                            headlineContent = {
+                                Text(text = "Privacy", style = MaterialTheme.typography.titleMedium)
+                            },
+                            trailingContent = { Chevron() },
+                        )
+                        links.forEach { link ->
+                            ListItem(
+                                modifier = Modifier.fillMaxWidth().clickable {
+                                    if (!openExternalLink(context, link.url)) {
+                                        scope.launch { snackbarHostState.showSnackbar(LINK_ERROR) }
+                                    }
+                                },
+                                leadingContent = { LeadingIcon(aboutLinkIcon(link.label)) },
+                                headlineContent = {
+                                    Text(
+                                        text = link.label,
+                                        style = MaterialTheme.typography.titleMedium,
+                                    )
+                                },
+                                trailingContent = {
+                                    Icon(
+                                        painter = painterResource(R.drawable.ic_open_in_new),
+                                        contentDescription = null,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                },
+                            )
+                        }
+                    }
                 }
             }
 
             item {
-                Spacer(Modifier.height(24.dp))
-            }
-            item {
-                Button(
-                    onClick = onSupport,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                    ),
-                ) {
-                    Text("Support Redraft")
-                }
-            }
-            item {
-                Spacer(Modifier.height(24.dp))
+                Text(
+                    text = "Redraft v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) " +
+                        "— MIT licence",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
+                )
             }
         }
     }
@@ -209,6 +256,11 @@ fun AboutScreen(
             title = { Text("Open-source licences") },
             text = {
                 Column {
+                    Text(
+                        text = LICENCES_SUBTITLE,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(bottom = 8.dp),
+                    )
                     openSourceNotices.forEach { notice ->
                         Text(
                             text = "${notice.library} — ${notice.licence}",
@@ -240,42 +292,64 @@ fun AboutScreen(
             },
         )
     }
+
+    if (showPrivacy) {
+        AlertDialog(
+            onDismissRequest = { showPrivacy = false },
+            title = { Text("Privacy") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(text = PRIVACY_1, style = MaterialTheme.typography.bodyMedium)
+                    Text(text = PRIVACY_2, style = MaterialTheme.typography.bodyMedium)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPrivacy = false }) { Text("Close") }
+            },
+        )
+    }
+}
+
+/** Leading icon for an external About link; unmapped labels get a neutral glyph. */
+private fun aboutLinkIcon(label: String): Int = when (label) {
+    "Source code" -> R.drawable.ic_github
+    "Report an issue" -> R.drawable.ic_bug
+    else -> R.drawable.ic_open_in_new
 }
 
 @Composable
-private fun IdentityBlock() {
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
+private fun FeatureChip(label: String, iconRes: Int) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = CircleShape,
     ) {
-        Text(text = "Redraft", style = MaterialTheme.typography.titleLarge)
-        Text(
-            text = "Version ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Text(text = DESCRIPTION, style = MaterialTheme.typography.bodyLarge)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(modifier = Modifier.size(8.dp).background(BrandAmber, CircleShape))
-            Spacer(Modifier.width(8.dp))
-            Text(text = STATUS_LINE, style = MaterialTheme.typography.bodyMedium)
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Icon(
+                painter = painterResource(iconRes),
+                contentDescription = null,
+                modifier = Modifier.size(14.dp),
+                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
         }
-        Text(text = "MIT licence", style = MaterialTheme.typography.bodyMedium)
     }
 }
 
 @Composable
-private fun ExternalLinkRow(link: SupportLink, onClick: () -> Unit) {
-    ListItem(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        headlineContent = { Text(link.label) },
-        trailingContent = {
-            Icon(
-                painter = painterResource(R.drawable.ic_open_in_new),
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
+private fun LeadingIcon(iconRes: Int) {
+    Icon(
+        painter = painterResource(iconRes),
+        contentDescription = null,
+        modifier = Modifier.size(24.dp),
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
     )
 }
 
@@ -294,6 +368,7 @@ private fun SectionHeader(title: String) {
     Text(
         text = title,
         style = MaterialTheme.typography.titleMedium,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 8.dp, bottom = 4.dp),
     )
 }
