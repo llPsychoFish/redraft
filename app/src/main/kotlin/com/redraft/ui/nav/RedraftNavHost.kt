@@ -5,6 +5,9 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -44,7 +47,6 @@ fun RedraftNavHost(
     NavHost(
         navController = navController,
         startDestination = ROUTE_HOME,
-        modifier = modifier,
         enterTransition = {
             fadeIn(animationSpec = tween(300)) +
                 slideInHorizontally(animationSpec = tween(300)) { it }
@@ -58,6 +60,7 @@ fun RedraftNavHost(
                 slideInHorizontally(animationSpec = tween(300)) { -it }
         },
         popExitTransition = {
+            // Symmetric to popEnterTransition: the viewer slides back out to the right.
             fadeOut(animationSpec = tween(300)) +
                 slideOutHorizontally(animationSpec = tween(300)) { it }
         },

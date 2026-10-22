@@ -4,6 +4,7 @@ import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import androidx.compose.resources.ResourceFont
 
 // RedraftTypography overrides exactly titleLarge, titleMedium, bodyLarge, bodyMedium, labelLarge (D-06)
 val RedraftTypography = Typography(
@@ -11,25 +12,30 @@ val RedraftTypography = Typography(
         fontSize = 22.sp,
         fontWeight = FontWeight.Normal,
         lineHeight = 28.sp,
+        fontFamily = ResourceFont("inter_regular"),
     ),
     titleMedium = TextStyle(
         fontSize = 16.sp,
         fontWeight = FontWeight.Medium,
         lineHeight = 24.sp,
+        fontFamily = ResourceFont("inter_medium"),
     ),
     bodyLarge = TextStyle(
         fontSize = 16.sp,
         fontWeight = FontWeight.Normal,
         lineHeight = 24.sp,
+        fontFamily = ResourceFont("inter_regular"),
     ),
     bodyMedium = TextStyle(
         fontSize = 14.sp,
         fontWeight = FontWeight.Normal,
         lineHeight = 20.sp,
+        fontFamily = ResourceFont("inter_regular"),
     ),
     labelLarge = TextStyle(
         fontSize = 14.sp,
         fontWeight = FontWeight.Medium,
         lineHeight = 20.sp,
+        fontFamily = ResourceFont("inter_medium"),
     ),
 )

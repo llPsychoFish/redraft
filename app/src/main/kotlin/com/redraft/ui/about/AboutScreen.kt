@@ -172,7 +172,7 @@ fun AboutScreen(
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FeatureChip("Open source", R.drawable.ic_github)
                             FeatureChip("Offline-first", R.drawable.ic_cloud_off)
-                            FeatureChip("No tracking", R.drawable.ic_shield)
+                            FeatureChip("No tracking", R.drawable.ic_shield, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -318,7 +318,7 @@ private fun aboutLinkIcon(label: String): Int = when (label) {
 }
 
 @Composable
-private fun FeatureChip(label: String, iconRes: Int) {
+private fun FeatureChip(label: String, iconRes: Int, maxLines: Int = 1, softWrap: Boolean = true) {
     Surface(
         color = MaterialTheme.colorScheme.secondaryContainer,
         shape = CircleShape,
@@ -338,6 +338,8 @@ private fun FeatureChip(label: String, iconRes: Int) {
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
+                maxLines = maxLines,
+                softWrap = softWrap,
             )
         }
     }
