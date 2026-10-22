@@ -57,6 +57,7 @@ fun HomeScreen(
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val recents by viewModel.recents.collectAsStateWithLifecycle()
+    val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     val openLauncher = rememberLauncherForActivityResult(
@@ -150,7 +151,12 @@ fun HomeScreen(
                 items(recents, key = { it.uri }) { file ->
                     RecentItem(
                         file = file,
-                        onOpen = { viewModel.openRecent(file) },
+                        onOpen = {
+                            viewModel.openRecent(
+                                file = file,
+                                startPage = if (settings.reopenAtLastPage) file.lastPageIndex else 0,
+                            )
+                        },
                         onRemove = { viewModel.removeRecent(file) },
                     )
                 }

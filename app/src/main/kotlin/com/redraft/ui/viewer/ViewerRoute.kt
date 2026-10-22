@@ -10,11 +10,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -34,6 +36,15 @@ fun ViewerRoute(
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
+
+    // "Keep screen on while reading" is a real behaviour, not a stored preference: the window flag
+    // is held only while a document is actually open, and released when the viewer leaves.
+    val view = LocalView.current
+    DisposableEffect(view, settings.keepScreenOn, uiState.pageCount) {
+        view.keepScreenOn = settings.keepScreenOn && uiState.pageCount > 0
+        onDispose { view.keepScreenOn = false }
+    }
 
     // Tap toggles the chrome. The tap is deferred by the double-tap window inside
     // singlePointerDoubleTap, so a double tap still zooms instead of flashing the bars.
