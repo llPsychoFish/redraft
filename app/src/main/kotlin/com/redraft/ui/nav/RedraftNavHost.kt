@@ -9,9 +9,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.redraft.ui.PdfViewerViewModel
+import com.redraft.ui.about.AboutScreen
 import com.redraft.ui.home.HomeScreen
 import com.redraft.ui.overview.PageOverviewRoute
 import com.redraft.ui.settings.SettingsScreen
+import com.redraft.ui.support.SupportScreen
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.viewer.ViewerRoute
 import kotlinx.coroutines.launch
@@ -20,6 +22,8 @@ const val ROUTE_HOME = "home"
 const val ROUTE_VIEWER = "viewer"
 const val ROUTE_OVERVIEW = "overview"
 const val ROUTE_SETTINGS = "settings"
+const val ROUTE_ABOUT = "about"
+const val ROUTE_SUPPORT = "support"
 
 @Composable
 fun RedraftNavHost(
@@ -67,6 +71,17 @@ fun RedraftNavHost(
             SettingsScreen(
                 settingsViewModel = settingsViewModel,
                 pdfViewerViewModel = viewModel,
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(ROUTE_ABOUT) {
+            AboutScreen(
+                onBack = { navController.popBackStack() },
+                onSupport = { navController.navigate(ROUTE_SUPPORT) },
+            )
+        }
+        composable(ROUTE_SUPPORT) {
+            SupportScreen(
                 onBack = { navController.popBackStack() },
             )
         }
