@@ -8,6 +8,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * How far apart two taps may be and still count as one double tap.
@@ -33,11 +38,22 @@ private val DOUBLE_TAP_SLOP = 48.dp
  * of the first tap's release and within [DOUBLE_TAP_SLOP] of it.
  */
 @Composable
-internal fun Modifier.singlePointerDoubleTap(onDoubleTap: () -> Unit): Modifier {
+internal fun Modifier.singlePointerDoubleTap(
+    onSingleTap: (() -> Unit)? = null,
+    onDoubleTap: () -> Unit,
+): Modifier {
     val doubleTapSlopPx = with(LocalDensity.current) { DOUBLE_TAP_SLOP.toPx() }
     return this.pointerInput(doubleTapSlopPx) {
+        // The pending-tap timer needs a coroutine scope of its own: the body of
+        // awaitEachGesture runs in AwaitPointerEventScope, which cannot launch.
+        val gestureScope = CoroutineScope(coroutineContext)
         var lastTapUpTime = 0L
         var lastTapPosition = Offset.Zero
+        // A single tap is only KNOWN to be single once the double-tap window has
+        // closed, so the callback is deferred by exactly that window and cancelled
+        // the moment a second tap arrives. Deferring without blocking is what keeps
+        // the next gesture detectable while the timer runs.
+        var pendingSingleTap: Job? = null
         awaitEachGesture {
             // Wait for a first pointer, then for it to go up, with no second
             // pointer allowed in between: a two-finger gesture is never a tap.
@@ -80,10 +96,20 @@ internal fun Modifier.singlePointerDoubleTap(onDoubleTap: () -> Unit): Modifier 
                 (down.position - lastTapPosition).getDistance() <= doubleTapSlopPx
             if (isDoubleTap) {
                 lastTapUpTime = 0L
+                pendingSingleTap?.cancel()
+                pendingSingleTap = null
                 onDoubleTap()
             } else {
                 lastTapUpTime = upTime
                 lastTapPosition = upPosition
+                if (onSingleTap != null) {
+                    pendingSingleTap?.cancel()
+                    pendingSingleTap = gestureScope.launch {
+                        delay(viewConfiguration.doubleTapTimeoutMillis.toLong())
+                        pendingSingleTap = null
+                        onSingleTap()
+                    }
+                }
             }
         }
     }

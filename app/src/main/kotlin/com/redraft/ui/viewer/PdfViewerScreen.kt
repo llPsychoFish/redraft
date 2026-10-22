@@ -59,6 +59,7 @@ private const val DEBOUNCE_MS = 250L
 fun PdfViewerScreen(
     viewModel: PdfViewerViewModel,
     settingsViewModel: SettingsViewModel,
+    onSingleTap: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -130,7 +131,7 @@ fun PdfViewerScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .zoomInput(viewModel, listState, viewportWidthPx)
-                    .singlePointerDoubleTap {
+                    .singlePointerDoubleTap(onSingleTap = onSingleTap) {
                         val current = viewModel.uiState.value.zoom
                         val target = if (current > 1.2f) 1f else 2f
                         viewModel.onZoomChanged(target)
