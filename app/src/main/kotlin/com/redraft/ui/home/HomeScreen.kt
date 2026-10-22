@@ -3,6 +3,7 @@ package com.redraft.ui.home
 import android.text.format.DateUtils
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -34,6 +35,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextAlign
@@ -130,11 +137,8 @@ fun HomeScreen(
                     .padding(padding)
                     .padding(24.dp),
             ) {
-                Icon(
-                    painter = painterResource(R.drawable.ic_pdf),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(72.dp),
+                EmptyStateIllustration(
+                    modifier = Modifier.size(width = 140.dp, height = 160.dp),
                 )
                 Text(
                     text = "No recent PDFs yet",
@@ -144,6 +148,12 @@ fun HomeScreen(
                 Text(
                     text = "Open a PDF to get started. Files you open will appear here.",
                     style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    text = "Tip: PDFs you open from other apps appear here too.",
+                    style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
@@ -172,10 +182,125 @@ fun HomeScreen(
                             )
                         },
                         onRemove = { viewModel.removeRecent(file) },
+                        // Staggered fade + placement animation as items enter/leave the list.
+                        modifier = Modifier.animateItem(),
                     )
                 }
             }
         }
+    }
+}
+
+/**
+ * Empty-state illustration: a small stack of page sheets, the front one carrying the
+ * brand motif from the app icon (amber selection box with corner handles). Drawn on
+ * Canvas so no new image assets or dependencies are needed, and it follows the theme
+ * in both light and dark modes.
+ */
+@Composable
+private fun EmptyStateIllustration(modifier: Modifier = Modifier) {
+    val outline = MaterialTheme.colorScheme.outline
+    val surface = MaterialTheme.colorScheme.surface
+    val surfaceVariant = MaterialTheme.colorScheme.surfaceVariant
+    val onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant
+    val amber = MaterialTheme.colorScheme.primary
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val corner = w * 0.06f
+
+        // Back sheet — tilted, outline only.
+        withTransform({
+            rotate(degrees = 6f, pivot = Offset(w * 0.55f, h * 0.5f))
+        }) {
+            drawRoundRect(
+                color = outline.copy(alpha = 0.5f),
+                topLeft = Offset(w * 0.28f, h * 0.10f),
+                size = Size(w * 0.58f, h * 0.74f),
+                cornerRadius = CornerRadius(corner),
+                style = Stroke(width = 2f),
+            )
+        }
+
+        // Middle sheet — slight counter-tilt, filled.
+        withTransform({
+            rotate(degrees = -3.5f, pivot = Offset(w * 0.48f, h * 0.52f))
+        }) {
+            drawRoundRect(
+                color = surfaceVariant,
+                topLeft = Offset(w * 0.18f, h * 0.13f),
+                size = Size(w * 0.60f, h * 0.74f),
+                cornerRadius = CornerRadius(corner),
+            )
+        }
+
+        // Front sheet — the page being edited.
+        val frontLeft = w * 0.14f
+        val frontTop = h * 0.16f
+        val frontW = w * 0.60f
+        val frontH = h * 0.74f
+        drawRoundRect(
+            color = surface,
+            topLeft = Offset(frontLeft, frontTop),
+            size = Size(frontW, frontH),
+            cornerRadius = CornerRadius(corner),
+        )
+        drawRoundRect(
+            color = outline.copy(alpha = 0.6f),
+            topLeft = Offset(frontLeft, frontTop),
+            size = Size(frontW, frontH),
+            cornerRadius = CornerRadius(corner),
+            style = Stroke(width = 2f),
+        )
+
+        // Muted "text line" bars above and below the selection.
+        val lineColor = onSurfaceVariant.copy(alpha = 0.25f)
+        val lineHeight = h * 0.035f
+        drawRoundRect(
+            color = lineColor,
+            topLeft = Offset(frontLeft + frontW * 0.12f, frontTop + frontH * 0.12f),
+            size = Size(frontW * 0.55f, lineHeight),
+            cornerRadius = CornerRadius(lineHeight / 2),
+        )
+        drawRoundRect(
+            color = lineColor,
+            topLeft = Offset(frontLeft + frontW * 0.12f, frontTop + frontH * 0.22f),
+            size = Size(frontW * 0.72f, lineHeight),
+            cornerRadius = CornerRadius(lineHeight / 2),
+        )
+
+        // Amber selection box with corner handles — the brand motif.
+        val selLeft = frontLeft + frontW * 0.12f
+        val selTop = frontTop + frontH * 0.40f
+        val selW = frontW * 0.68f
+        val selH = frontH * 0.26f
+        drawRoundRect(
+            color = amber,
+            topLeft = Offset(selLeft, selTop),
+            size = Size(selW, selH),
+            cornerRadius = CornerRadius(corner * 0.5f),
+            style = Stroke(width = 3f),
+        )
+        val handle = h * 0.035f
+        listOf(
+            Offset(selLeft, selTop),
+            Offset(selLeft + selW, selTop),
+            Offset(selLeft, selTop + selH),
+            Offset(selLeft + selW, selTop + selH),
+        ).forEach { center ->
+            drawRect(
+                color = amber,
+                topLeft = Offset(center.x - handle / 2, center.y - handle / 2),
+                size = Size(handle, handle),
+            )
+        }
+
+        drawRoundRect(
+            color = lineColor,
+            topLeft = Offset(frontLeft + frontW * 0.12f, frontTop + frontH * 0.78f),
+            size = Size(frontW * 0.40f, lineHeight),
+            cornerRadius = CornerRadius(lineHeight / 2),
+        )
     }
 }
 
