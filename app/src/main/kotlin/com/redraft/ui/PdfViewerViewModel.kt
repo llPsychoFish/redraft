@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -60,6 +61,9 @@ data class ViewerUiState(
     // True while a pinch gesture owns the scroll position. The scroll-restore
     // effect must not fight the focal anchoring while it is set (D-06, D-07).
     val gestureActive: Boolean = false,
+    // True until the first recent-files emission arrives from DataStore.
+    // HomeScreen uses this to suppress the empty-state flicker on cold start.
+    val isLoadingRecents: Boolean = true,
     // A one-shot command to move the list. ONLY this may move the list - the
     // visiblePageIndex / scrollOffsetPx pair is a MIRROR of the list's own
     // position and must never drive it (during a fling the mirror lags a frame
@@ -94,6 +98,7 @@ class PdfViewerViewModel(
     val documentOpened: SharedFlow<Unit> = _documentOpened.asSharedFlow()
 
     val recents: StateFlow<List<RecentFile>> = recentsRepository.recents
+        .onEach { _uiState.update { it.copy(isLoadingRecents = false) } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     // Cache size (A-3) — null = not yet measured

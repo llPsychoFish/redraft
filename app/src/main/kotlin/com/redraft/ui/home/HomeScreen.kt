@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -117,7 +118,10 @@ fun HomeScreen(
             }
         },
     ) { padding ->
-        if (recents.isEmpty()) {
+        if (uiState.isLoadingRecents) {
+            // Blank container — no empty-state flicker while DataStore read is in-flight.
+            Box(modifier = Modifier.fillMaxSize().padding(padding))
+        } else if (recents.isEmpty()) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterVertically),
