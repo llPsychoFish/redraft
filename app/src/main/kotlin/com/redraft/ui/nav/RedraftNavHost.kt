@@ -66,6 +66,18 @@ fun RedraftNavHost(
             popExitTransition = {
                 slideOutHorizontally(animationSpec = tween(350, easing = FastOutSlowInEasing)) { it }
             },
+            predictivePopEnterTransition = { _ ->
+                slideInHorizontally(animationSpec = tween(350, easing = FastOutSlowInEasing)) { -it / 3 } +
+                    fadeIn(animationSpec = tween(200, easing = FastOutSlowInEasing))
+            },
+            predictivePopExitTransition = { _ ->
+                if (initialState.destination.route == ROUTE_OVERVIEW) {
+                    fadeOut(animationSpec = tween(250, easing = FastOutSlowInEasing)) +
+                        slideOutVertically(animationSpec = tween(250, easing = FastOutSlowInEasing)) { it / 4 }
+                } else {
+                    slideOutHorizontally(animationSpec = tween(350, easing = FastOutSlowInEasing)) { it }
+                }
+            },
         ) {
             composable(ROUTE_HOME) {
                 HomeScreen(
