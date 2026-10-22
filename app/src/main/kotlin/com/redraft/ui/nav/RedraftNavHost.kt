@@ -72,6 +72,8 @@ fun RedraftNavHost(
                 settingsViewModel = settingsViewModel,
                 pdfViewerViewModel = viewModel,
                 onBack = { navController.popBackStack() },
+                onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
+                onOpenSupport = { navController.navigate(ROUTE_SUPPORT) },
             )
         }
         composable(ROUTE_ABOUT) {

@@ -119,6 +119,11 @@ class PdfViewerViewModel(
         viewModelScope.launch { recentsRepository.remove(file.uri) }
     }
 
+    /** Empties the recent-files list only — the documents themselves are untouched. */
+    fun clearRecents() {
+        viewModelScope.launch { recentsRepository.clear() }
+    }
+
     fun onZoomChanged(zoom: Float) {
         val clamped = clampZoom(zoom)
         _uiState.update { it.copy(zoom = clamped) }

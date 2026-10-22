@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.layout.Row
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -25,6 +26,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -51,6 +53,8 @@ fun SettingsScreen(
     settingsViewModel: SettingsViewModel,
     pdfViewerViewModel: PdfViewerViewModel,
     onBack: () -> Unit,
+    onOpenAbout: () -> Unit,
+    onOpenSupport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
@@ -58,7 +62,7 @@ fun SettingsScreen(
     val cacheSize by pdfViewerViewModel.cacheSizeBytes.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val settingsState = settings ?: AppSettings()
+    val settingsState = settings
 
     LaunchedEffect(Unit) {
         pdfViewerViewModel.refreshCacheSize()
@@ -98,12 +102,20 @@ fun SettingsScreen(
             item { ReopenAtLastPageSwitch(settingsState, settingsViewModel) }
             item { Divider() }
             item { SectionHeader("Storage") }
-            item { ClearRecentsButton(settingsViewModel) }
-            item { ClearCacheButton(pdfViewerViewModel) }
+            item { ClearRecentsButton(onClear = { pdfViewerViewModel.clearRecents() }) }
+            item {
+                ClearCacheButton(
+                    cacheSize = cacheSize,
+                    onClear = {
+                        pdfViewerViewModel.clearCaches()
+                        pdfViewerViewModel.refreshCacheSize()
+                    },
+                )
+            }
             item { Divider() }
             item { SectionHeader("About") }
-            item { AboutSupportRow(title = "About Redraft", onClick = { }) }
-            item { AboutSupportRow(title = "Support Redraft", onClick = { }) }
+            item { NavigationRow(title = "About Redraft", onClick = onOpenAbout) }
+            item { NavigationRow(title = "Support Redraft", onClick = onOpenSupport) }
         }
     }
 }
@@ -197,24 +209,65 @@ private fun ReopenAtLastPageSwitch(settings: AppSettings, viewModel: SettingsVie
 }
 
 @Composable
-private fun ClearRecentsButton(viewModel: SettingsViewModel) {
+private fun ClearRecentsButton(onClear: () -> Unit) {
+    var confirming by remember { mutableStateOf(false) }
+
     ListItem(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable(onClick = { }),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable { confirming = true },
         leadingContent = { Icon(painter = painterResource(R.drawable.ic_more_vert), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent = { Text(text = "Clear list", style = MaterialTheme.typography.titleMedium) }
     )
+
+    if (confirming) {
+        AlertDialog(
+            onDismissRequest = { confirming = false },
+            title = { Text("Remove recent files?") },
+            text = {
+                Text(
+                    "This removes the recent-files list from this device. " +
+                        "The files themselves are not deleted."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    confirming = false
+                    onClear()
+                }) { Text("Remove") }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirming = false }) { Text("Not now") }
+            },
+        )
+    }
 }
 
 @Composable
-private fun ClearCacheButton(pdfViewerViewModel: PdfViewerViewModel) {
+private fun ClearCacheButton(cacheSize: Long?, onClear: () -> Unit) {
     ListItem(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable(onClick = { pdfViewerViewModel.clearCaches() }),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable(onClick = onClear),
         leadingContent = { Icon(painter = painterResource(R.drawable.ic_more_vert), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent = { Text(text = "Clear cache", style = MaterialTheme.typography.titleMedium) },
-        supportingContent = { Text(text = "Cached pages and thumbnails: Checking…", style = MaterialTheme.typography.bodyMedium) }
+        supportingContent = {
+            Text(
+                text = "Cached pages and thumbnails: ${formatCacheSize(cacheSize)}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
     )
 }
 
 @Composable
-private fun AboutSupportRow(title: String, onClick: () -> Unit) {
+private fun NavigationRow(title: String, onClick: () -> Unit) {
+    ListItem(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).clickable(onClick = onClick),
+        headlineContent = { Text(text = title, style = MaterialTheme.typography.titleMedium) },
+        trailingContent = {
+            Icon(
+                painter = painterResource(R.drawable.ic_chevron_right),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        },
+    )
 }
