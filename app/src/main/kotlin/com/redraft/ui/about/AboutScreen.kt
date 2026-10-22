@@ -121,8 +121,8 @@ fun AboutScreen(
                 onClick = onSupport,
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
             ) {
                 Text("Support Redraft")
@@ -151,12 +151,12 @@ fun AboutScreen(
                         Text(
                             text = DESCRIPTION,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Text(
                             text = STATUS_LINE,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSurface,
                         )
                         Surface(
                             color = MaterialTheme.colorScheme.primaryContainer,
@@ -320,7 +320,7 @@ private fun aboutLinkIcon(label: String): Int = when (label) {
 @Composable
 private fun FeatureChip(label: String, iconRes: Int, maxLines: Int = 1, softWrap: Boolean = true) {
     Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
+        color = MaterialTheme.colorScheme.primaryContainer,
         shape = CircleShape,
     ) {
         Row(
@@ -332,12 +332,12 @@ private fun FeatureChip(label: String, iconRes: Int, maxLines: Int = 1, softWrap
                 painter = painterResource(iconRes),
                 contentDescription = null,
                 modifier = Modifier.size(14.dp),
-                tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
             )
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
                 maxLines = maxLines,
                 softWrap = softWrap,
             )
