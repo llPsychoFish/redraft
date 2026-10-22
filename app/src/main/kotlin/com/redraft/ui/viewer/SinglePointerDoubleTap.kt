@@ -105,7 +105,7 @@ internal fun Modifier.singlePointerDoubleTap(
                 if (onSingleTap != null) {
                     pendingSingleTap?.cancel()
                     pendingSingleTap = gestureScope.launch {
-                        delay(viewConfiguration.doubleTapTimeoutMillis.toLong())
+                        delay(viewConfiguration.doubleTapTimeoutMillis)
                         pendingSingleTap = null
                         onSingleTap()
                     }
