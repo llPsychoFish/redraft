@@ -48,19 +48,20 @@ fun RedraftNavHost(
         navController = navController,
         startDestination = ROUTE_HOME,
         enterTransition = {
-            fadeIn(animationSpec = tween(300)) +
-                slideInHorizontally(animationSpec = tween(300)) { it }
+            fadeIn(animationSpec = tween(250)) +
+                slideInHorizontally(animationSpec = tween(250)) { it }
         },
         exitTransition = {
-            fadeOut(animationSpec = tween(300)) +
-                slideOutHorizontally(animationSpec = tween(300)) { -it }
+            fadeOut(animationSpec = tween(250)) +
+                slideOutHorizontally(animationSpec = tween(250)) { -it }
         },
         popEnterTransition = {
-            fadeIn(animationSpec = tween(300)) +
-                slideInHorizontally(animationSpec = tween(300)) { -it }
+            fadeIn(animationSpec = tween(250)) +
+                slideInHorizontally(animationSpec = tween(250)) { -it }
         },
         popExitTransition = {
-            fadeOut(animationSpec = tween(300))
+            fadeOut(animationSpec = tween(250)) +
+                slideOutHorizontally(animationSpec = tween(250)) { it }
         },
     ) {
         composable(ROUTE_HOME) {
