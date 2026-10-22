@@ -188,6 +188,8 @@ private fun Modifier.zoomInput(
             var horizontalDrag = false
             var lastPanDx = 0f
             var previousPair: TouchPair? = null
+            // Track the last known pointer position for incremental pan delta.
+            var lastPosition = downPosition
             try {
                 while (true) {
                     val event = awaitPointerEvent()
@@ -268,7 +270,9 @@ private fun Modifier.zoomInput(
                         if (zoom > MIN_ZOOM) {
                             val change = event.changes.firstOrNull { it.id == pointerId }
                                 ?: event.changes.first()
-                            val dx = change.position.x - downPosition.x
+                            // Track previous position for incremental delta.
+                            val dx = change.position.x - lastPosition.x
+                            lastPosition = change.position
                             val dy = change.position.y - downPosition.y
                             if (!horizontalDrag) {
                                 if (abs(dx) > viewConfiguration.touchSlop &&
