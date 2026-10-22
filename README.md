@@ -4,10 +4,12 @@ An Android PDF editor that performs **true content editing** — changing existi
 images inside a PDF — rather than just annotating it. Pages are rendered through PDFium
 (via NDK/JNI) and edited at the page-object level, regenerating the content stream on save.
 
-> **Status: Phase 1 of 5 complete.** Redraft is currently a *PDF viewer*: it opens, renders,
-> zooms, pans and navigates documents. The editing features — selecting an object, changing
-> its text, moving an image, writing the file back — are Phases 2 through 5 and are **not
-> implemented yet**. See [Roadmap](#roadmap).
+> **Status: v0.1.0 — viewer only.** Redraft opens, renders, zooms, pans and navigates
+> documents, with a branded theme, a working Settings screen, and honest About/Support pages.
+> The editing features — selecting an object, changing its text, moving an image, writing the
+> file back — are Phases 2 through 5 and are **not implemented yet**. The About screen says
+> this in the app too: *"Viewer today; true content editing is in development."* See
+> [Roadmap](#roadmap).
 
 ---
 
@@ -30,6 +32,20 @@ images inside a PDF — rather than just annotating it. Pages are rendered throu
 
 Selecting objects, editing text, editing images, and saving. Those are the whole point of the
 project and they are the next four phases.
+
+---
+
+## Screenshots
+
+No screenshots are committed yet — the images would otherwise ship before the app has been
+visually reviewed on a device. When they exist, they belong in `docs/screenshots/` at 1080 px
+wide, captured on a phone with the default (system) theme, and linked here as:
+
+| Home | Viewer | Settings |
+|---|---|---|
+| `docs/screenshots/home.png` | `docs/screenshots/viewer.png` | `docs/screenshots/settings.png` |
+
+Capture them with `adb exec-out screencap -p > docs/screenshots/<name>.png`.
 
 ---
 
@@ -73,6 +89,33 @@ The debug APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
+
+### Release build
+
+```bash
+./gradlew :app:assembleRelease
+```
+
+The APK lands in `app/build/outputs/apk/release/`. R8 shrinking is on, and its keep rules for
+the PDFium JNI binding live in `app/proguard-rules.pro`; the mapping file is written to
+`app/build/outputs/mapping/release/mapping.txt` — **keep it**, it is the only way to read a
+release stack trace.
+
+Signing material is never committed. The build reads these keys from `local.properties` (or the
+same names in the environment), and simply produces an **unsigned** APK when they are absent:
+
+```properties
+RELEASE_STORE_FILE=/absolute/path/to/redraft-release.jks
+RELEASE_STORE_PASSWORD=...
+RELEASE_KEY_ALIAS=redraft
+RELEASE_KEY_PASSWORD=...
+```
+
+The keystore must be backed up in **two places** before the first upload: a lost key cannot be
+replaced, and a replacement key blocks every future update to installed users.
+
+> `applicationId` is still `com.redraft`. It must be settled before the first publish, because
+> changing it afterwards ships a different app (see the TODO in `app/build.gradle.kts`).
 
 ### Sample document
 
@@ -160,6 +203,7 @@ page".)
 | Phase | Name | Status |
 |---|---|---|
 | 1 | Foundation & Viewer | **Done** — 14/14 plans, UAT 19/19, verification passed |
+| 01.1 | UI, Settings & Release Prep | **Done** — v0.1.0: brand theme, Settings, About/Support, adaptive icon, signed-release configuration |
 | 2 | Selection & Hit-Testing | Next — a tap reliably selects the object you meant |
 | 3 | Text Editing MVP | Planned — inline editing of a selected text object |
 | 4 | Image & Object Editing | Planned — select, move, resize, delete, replace |
@@ -205,6 +249,10 @@ rationale and the workflow rules.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). The same text ships inside the app at `res/raw/licence.txt` and is
+shown in Settings → About → Licence.
 
-PDFium is BSD/Apache licensed and arrives through the `pdfiumandroid` dependency.
+PDFium's own `LICENSE` carries the BSD-3-Clause text for PDFium code and the Apache 2.0 terms for
+its bundled parts; `io.legere:pdfiumandroid`, Kotlin, kotlinx.coroutines and the AndroidX libraries
+declare Apache 2.0 in their published Maven metadata. Settings → About lists them, with each
+licence checked against the resolved artifact rather than copied from memory.

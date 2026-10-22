@@ -1,0 +1,59 @@
+name: Feature request
+description: Suggest a capability or an improvement
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The roadmap is deliberately narrow: **true content editing** is the core value, and the
+        phases after the viewer are selection → text editing → image editing → save. Requests
+        that make editing work better are the most useful kind.
+
+        Out of scope by decision: in-app billing or a donation SDK (support is external links
+        only), any network permission, analytics/crash reporting, ad-supported builds, and
+        annotation-only features that pretend to edit content.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation, not the implementation.
+      placeholder: "When I open a scanned contract I cannot tell which pages are blank without..."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Redraft to do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Viewing and navigation
+        - Selection and hit-testing
+        - Text editing
+        - Image and object editing
+        - Saving
+        - Settings and accessibility
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have tried
+      description: Other apps, workarounds, or approaches you considered.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I checked that this is not already on the roadmap
+          required: true
+        - label: This request does not require network access, billing, or analytics
+          required: true

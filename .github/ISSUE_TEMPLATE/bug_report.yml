@@ -1,0 +1,69 @@
+name: Bug report
+description: Something in Redraft behaves incorrectly or crashes
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Redraft is a **viewer today**. Selecting and editing existing PDF content is not
+        implemented yet, so "I can't edit text" is expected behaviour, not a bug — please don't
+        file it. Bugs worth filing are crashes, blank or wrong page rendering, zoom/pan/scroll
+        problems, and anything that loses your recent-files list or settings.
+  - type: input
+    id: version
+    attributes:
+      label: Redraft version
+      description: Shown at the bottom of Settings → About (e.g. 0.1.0 (2))
+      placeholder: "0.1.0 (2)"
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and Android version
+      placeholder: "Pixel 8, Android 15"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Numbered steps from a fresh app start, if you can.
+      placeholder: |
+        1. Open the app
+        2. Open a 120-page PDF
+        3. Pinch to 3× and scroll
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened
+      description: Include the exact error text if the app showed one, and a logcat excerpt for crashes.
+    validations:
+      required: true
+  - type: textarea
+    id: pdf
+    attributes:
+      label: The PDF (optional)
+      description: |
+        A document that reproduces the problem helps enormously — but only share one you are
+        allowed to share. Redraft never uploads anything; this is a manual attachment.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before filing
+      options:
+        - label: I am on the latest release build
+          required: true
+        - label: I searched existing issues for this problem
+          required: true
