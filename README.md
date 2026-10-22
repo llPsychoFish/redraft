@@ -4,7 +4,7 @@ An Android PDF editor that performs **true content editing** — changing existi
 images inside a PDF — rather than just annotating it. Pages are rendered through PDFium
 (via NDK/JNI) and edited at the page-object level, regenerating the content stream on save.
 
-> **Status: v0.1.0 — viewer only.** Redraft opens, renders, zooms, pans and navigates
+> **Status: v0.1.1 — viewer only.** Redraft opens, renders, zooms, pans and navigates
 > documents, with a branded theme, a working Settings screen, and honest About/Support pages.
 > The editing features — selecting an object, changing its text, moving an image, writing the
 > file back — are Phases 2 through 5 and are **not implemented yet**. The About screen says
@@ -55,6 +55,7 @@ Capture them with `adb exec-out screencap -p > docs/screenshots/<name>.png`.
 |---|---|
 | Language | Kotlin 2.4.20 |
 | UI | Jetpack Compose (BOM 2026.09.00), Material 3 |
+| Typography | Inter font (TTF, bundled) |
 | PDF engine | [pdfiumandroid](https://github.com/johngray1965/PdfiumAndroidKt) 3.0.4-alpha01 (PDFium via NDK/JNI) |
 | Build | AGP 9.4.0, Gradle 9.6.0, JDK 17 toolchain |
 | Platform | minSdk 26, targetSdk 37, ABIs `arm64-v8a` + `x86_64` |
@@ -204,12 +205,21 @@ page".)
 |---|---|---|
 | 1 | Foundation & Viewer | **Done** — 14/14 plans, UAT 19/19, verification passed |
 | 01.1 | UI, Settings & Release Prep | **Done** — v0.1.0: brand theme, Settings, About/Support, adaptive icon, signed-release configuration |
+| **01.2** | **Polish & Performance** | **Done** — v0.1.1: navigation transition fix, dark mode contrast, Inter font bundled |
 | 2 | Selection & Hit-Testing | Next — a tap reliably selects the object you meant |
 | 3 | Text Editing MVP | Planned — inline editing of a selected text object |
 | 4 | Image & Object Editing | Planned — select, move, resize, delete, replace |
 | 5 | Save & Hardening | Planned — write the edited document back out |
 
 The full plan, requirement and decision history lives in `.planning/`.
+
+---
+
+## Recent improvements (v0.1.1)
+
+- **Navigation transitions**: Fixed back-gesture glitch where screens overlapped and jumped. `popExitTransition` now slides out to the right (mirroring `popEnter`), and all transition durations reduced from 300 ms → 250 ms to minimize overlap while the heavy viewer screen composes.
+- **Dark/AMOLED contrast**: About screen body text uses `onSurface` (full opacity), feature chips use `primaryContainer`/`onPrimaryContainer` (amber on dark), and the Support button uses `primary`/`onPrimary` — all readable in Light, Dark, and AMOLED themes.
+- **Typography**: Genuine Inter TTF fonts (Regular, Medium, SemiBold, Bold) bundled via `res/font/` and wired into `RedraftTypography`.
 
 ---
 
