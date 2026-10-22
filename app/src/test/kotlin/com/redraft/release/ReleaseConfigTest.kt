@@ -25,7 +25,7 @@ class ReleaseConfigTest {
             "versionName must be MAJOR.MINOR.PATCH, was ${BuildConfig.VERSION_NAME}",
             Regex("""\d+\.\d+\.\d+""").matches(BuildConfig.VERSION_NAME),
         )
-        assertEquals("0.1.0", BuildConfig.VERSION_NAME)
+        assertEquals("0.1.2", BuildConfig.VERSION_NAME)
         assertTrue("versionName in the script must be quoted", buildScript.contains("versionName = \"${BuildConfig.VERSION_NAME}\""))
     }
 
@@ -33,7 +33,7 @@ class ReleaseConfigTest {
     fun `versionCode has been incremented for this release`() {
         assertTrue(
             "versionCode must increase with every published build, was ${BuildConfig.VERSION_CODE}",
-            BuildConfig.VERSION_CODE >= 2,
+            BuildConfig.VERSION_CODE >= 3,
         )
     }
 
