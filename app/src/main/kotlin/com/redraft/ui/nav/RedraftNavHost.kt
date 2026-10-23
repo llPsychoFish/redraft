@@ -49,11 +49,19 @@ fun RedraftNavHost(
     val navController = rememberNavController()
     val viewModel: PdfViewerViewModel = pdfViewerViewModel
     
-    // Collect documentOpened events and navigate to viewer
+    // Collect documentOpened events and navigate to viewer.
+    // Lives here, not in HomeScreen: a document can be opened while Home is not on screen
+    // (an "Open with" arriving while Settings or the viewer is showing), and from a cold start
+    // before Home has composed.
     LaunchedEffect(viewModel) {
-        while (true) {
-            viewModel.documentOpened.receive()
-            navController.navigate(ROUTE_VIEWER)
+        viewModel.documentOpened.collect {
+            val current = navController.currentDestination?.route
+            if (current != ROUTE_VIEWER) {
+                navController.navigate(ROUTE_VIEWER) {
+                    popUpTo(ROUTE_HOME) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
         }
     }
 

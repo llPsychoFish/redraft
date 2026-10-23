@@ -22,8 +22,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.channels.ReceiveChannel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -94,7 +95,7 @@ class PdfViewerViewModel(
     val handle: StateFlow<DocumentHandle?> = _handle.asStateFlow()
 
     private val _documentOpened = Channel<Unit>(capacity = Channel.BUFFERED)
-    val documentOpened: ReceiveChannel<Unit> = _documentOpened
+    val documentOpened: Flow<Unit> = _documentOpened.receiveAsFlow()
 
     val recents: StateFlow<List<RecentFile>> = recentsRepository.recents
         .onEach { _uiState.update { it.copy(isLoadingRecents = false) } }
