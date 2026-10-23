@@ -1,6 +1,10 @@
 package com.redraft.ui.nav
 
+import android.net.Uri
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +32,7 @@ import com.redraft.ui.viewer.ViewerRoute
 import kotlinx.coroutines.launch
 
 const val ROUTE_HOME = "home"
+const val ROUTE_PDF_VIEWER = "pdfViewer"
 const val ROUTE_VIEWER = "viewer"
 const val ROUTE_OVERVIEW = "overview"
 const val ROUTE_SETTINGS = "settings"
@@ -39,9 +44,17 @@ fun RedraftNavHost(
     modifier: Modifier = Modifier,
     settingsViewModel: SettingsViewModel,
     pdfViewerViewModel: PdfViewerViewModel,
+    initialUri: Uri? = null,
 ) {
     val navController = rememberNavController()
     val viewModel: PdfViewerViewModel = pdfViewerViewModel
+    // If an incoming URI was provided (e.g., from "Open With"), navigate to it
+    LaunchedEffect(initialUri) {
+        initialUri?.let {
+            // Navigate to the PDF viewer with the given URI
+            navController.navigate(ROUTE_PDF_VIEWER + "?uri=" + it.toString())
+        }
+    }
     val scope = rememberCoroutineScope()
 
     Surface(
@@ -87,12 +100,23 @@ fun RedraftNavHost(
                     onOpenSettings = { navController.navigate(ROUTE_SETTINGS) },
                 )
             }
-            composable(ROUTE_VIEWER) {
+composable(ROUTE_VIEWER) {
                 ViewerRoute(
                     viewModel = viewModel,
                     settingsViewModel = settingsViewModel,
                     onBack = { navController.popBackStack() },
                     onOpenOverview = { navController.navigate(ROUTE_OVERVIEW) },
+                )
+            }
+            composable(route = ROUTE_PDF_VIEWER) { backStackEntry ->
+                val uriString = backStackEntry.arguments?.getString("uri") ?: ""
+                val uri = Uri.parse(uriString)
+                ViewerRoute(
+                    viewModel = viewModel,
+                    settingsViewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenOverview = { navController.navigate(ROUTE_OVERVIEW) },
+                    initialUri = uri
                 )
             }
             composable(

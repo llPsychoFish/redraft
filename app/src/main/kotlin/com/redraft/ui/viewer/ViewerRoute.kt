@@ -1,5 +1,6 @@
 package com.redraft.ui.viewer
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -53,6 +54,7 @@ fun ViewerRoute(
     onBack: () -> Unit,
     onOpenOverview: () -> Unit,
     modifier: Modifier = Modifier,
+    initialUri: Uri? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
