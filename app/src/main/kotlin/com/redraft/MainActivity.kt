@@ -6,6 +6,7 @@ import android.os.StrictMode
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.redraft.ui.nav.RedraftNavHost
@@ -17,7 +18,10 @@ import com.redraft.data.AppSettings
 import com.redraft.data.SafDocumentOpener
 
 class MainActivity : ComponentActivity() {
-    private lateinit var pdfViewerViewModel: PdfViewerViewModel
+    // Created by the activity itself, NOT inside setContent: Compose composes after onCreate returns,
+    // so a ViewModel assigned from the composition is not there yet when the intent is handled
+    // (that was the "Open with" crash). viewModel(factory) in setContent resolves to this same instance.
+    private val pdfViewerViewModel: PdfViewerViewModel by viewModels { PdfViewerViewModel.factory(this) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -40,7 +44,6 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(this))
             val vm: PdfViewerViewModel = viewModel(factory = PdfViewerViewModel.factory(this))
-            pdfViewerViewModel = vm
             val settings = settingsViewModel.settings.collectAsStateWithLifecycle()
 
             RedraftTheme(
@@ -69,7 +72,11 @@ class MainActivity : ComponentActivity() {
         val uri = intent.data ?: return
         // Keep the grant alive if the sender offers one; a plain temporary grant is fine too,
         // the file is read straight away.
-        SafDocumentOpener.persistPermission(this, uri)
+        try {
+            SafDocumentOpener.persistPermission(this, uri)
+        } catch (_: Exception) {
+            // Not persistable (temporary grant, file:// URI): the file is read right away anyway.
+        }
         pdfViewerViewModel.open(uri.toString())
         // Consume it so a config change / recreate does not open it a second time.
         intent.action = null
