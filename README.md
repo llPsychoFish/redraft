@@ -37,15 +37,19 @@ project and they are the next four phases.
 
 ## Screenshots
 
-No screenshots are committed yet — the images would otherwise ship before the app has been
-visually reviewed on a device. When they exist, they belong in `docs/screenshots/` at 1080 px
-wide, captured on a phone with the default (system) theme, and linked here as:
+Captured on a phone, not mocked up: `adb exec-out screencap -p > docs/screenshots/<name>.png`,
+720 × 1600, no staging beyond opening a real PDF.
 
-| Home | Viewer | Settings |
+| Home — no recents yet | Viewer | Settings |
 |---|---|---|
-| `docs/screenshots/home.png` | `docs/screenshots/viewer.png` | `docs/screenshots/settings.png` |
+| <img src="docs/screenshots/home.png" width="240" alt="Home screen: no recent PDFs yet, with the Open PDF button"> | <img src="docs/screenshots/viewer.png" width="240" alt="Viewer: page 2 of 3 of a document, with the page counter and overview button in the bar"> | <img src="docs/screenshots/settings.png" width="240" alt="Settings: appearance, viewer and storage sections"> |
 
-Capture them with `adb exec-out screencap -p > docs/screenshots/<name>.png`.
+| Home — light theme, with a recent file | Settings — light theme |
+|---|---|
+| <img src="docs/screenshots/light_home.png" width="240" alt="Home screen in the light theme, one recent file listed"> | <img src="docs/screenshots/light_settings.png" width="240" alt="Settings in the light theme"> |
+
+To refresh one, open the app to the screen you want and run the `adb exec-out screencap` line
+above with the name it already has, so the links here keep working.
 
 ---
 
