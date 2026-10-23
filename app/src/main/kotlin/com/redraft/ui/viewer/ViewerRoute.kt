@@ -9,6 +9,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -122,6 +123,7 @@ fun ViewerRoute(
             TopAppBar(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
                     .padding(top = androidx.compose.ui.platform.LocalDensity.current.run { topPaddingPx.toDp() }),
                 title = {
                     Text(
