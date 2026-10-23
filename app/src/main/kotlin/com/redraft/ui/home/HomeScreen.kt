@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -83,22 +84,24 @@ fun HomeScreen(
         viewModel.documentOpened.collect { onDocumentOpened() }
     }
 
-    LaunchedEffect(uiState.error) {
-        val error = uiState.error ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(error.userMessage())
-        viewModel.clearError()
+    val errorMessage = uiState.error?.userMessage()
+    LaunchedEffect(errorMessage) {
+        if (errorMessage != null) {
+            snackbarHostState.showSnackbar(errorMessage)
+            viewModel.clearError()
+        }
     }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             CenterAlignedTopAppBar(
-                title = { Text("Redraft") },
+                title = { Text(stringResource(R.string.home_title)) },
                 actions = {
                     IconButton(onClick = onOpenSettings) {
                         Icon(
                             painter = painterResource(R.drawable.ic_settings),
-                            contentDescription = "Settings",
+                            contentDescription = stringResource(R.string.cd_settings),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -120,7 +123,7 @@ fun HomeScreen(
                             contentDescription = null,
                         )
                     },
-                    text = { Text("Open PDF") },
+                    text = { Text(stringResource(R.string.open_pdf)) },
                 )
             }
         },
@@ -141,18 +144,18 @@ fun HomeScreen(
                     modifier = Modifier.size(width = 140.dp, height = 160.dp),
                 )
                 Text(
-                    text = "No recent PDFs yet",
+                    text = stringResource(R.string.home_empty_title),
                     style = MaterialTheme.typography.headlineMedium,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = "Open a PDF to get started. Files you open will appear here.",
+                    text = stringResource(R.string.home_empty_subtitle),
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
                 Text(
-                    text = "Tip: PDFs you open from other apps appear here too.",
+                    text = stringResource(R.string.home_empty_tip),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -164,7 +167,7 @@ fun HomeScreen(
                         contentColor = MaterialTheme.colorScheme.onPrimary,
                     ),
                 ) {
-                    Text("Open PDF")
+                    Text(stringResource(R.string.open_pdf))
                 }
             }
         } else {
@@ -178,7 +181,7 @@ fun HomeScreen(
                         onOpen = {
                             viewModel.openRecent(
                                 file = file,
-                                startPage = if (settings.reopenAtLastPage) file.lastPageIndex else 0,
+                                startPage = if (settings?.reopenAtLastPage == true) file.lastPageIndex else 0,
                             )
                         },
                         onRemove = { viewModel.removeRecent(file) },
@@ -344,7 +347,7 @@ private fun RecentItem(
             IconButton(onClick = { menuExpanded = true }) {
                 Icon(
                     painter = painterResource(R.drawable.ic_more_vert),
-                    contentDescription = "More options",
+                    contentDescription = stringResource(R.string.cd_more_options),
                 )
             }
             androidx.compose.material3.DropdownMenu(
@@ -352,7 +355,7 @@ private fun RecentItem(
                 onDismissRequest = { menuExpanded = false },
             ) {
                 androidx.compose.material3.DropdownMenuItem(
-                    text = { Text("Remove from recents") },
+                    text = { Text(stringResource(R.string.home_remove_from_recents)) },
                     leadingIcon = {
                         Icon(
                             painter = painterResource(R.drawable.ic_delete),
@@ -370,8 +373,9 @@ private fun RecentItem(
     )
 }
 
+@Composable
 private fun DocumentError.userMessage(): String = when (this) {
-    is DocumentError.PasswordProtected -> "This PDF is password-protected"
-    is DocumentError.Unreadable -> "Couldn't open this file"
-    is DocumentError.AccessRevoked -> "Access to this file was revoked"
+    is DocumentError.PasswordProtected -> stringResource(R.string.error_password_protected)
+    is DocumentError.Unreadable -> stringResource(R.string.error_unreadable)
+    is DocumentError.AccessRevoked -> stringResource(R.string.error_access_revoked)
 }

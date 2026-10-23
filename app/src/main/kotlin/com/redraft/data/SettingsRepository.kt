@@ -13,9 +13,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.SharingStarted
 import java.io.IOException
 
 // Single-delegate DataStore for settings (D-09, D-10)
@@ -66,11 +64,6 @@ class SettingsRepository(
             if (cause is IOException) emit(emptyPreferences()) else throw cause
         }
         .map { preferences -> decodeSettings(preferences) }
-        .stateIn(
-            kotlinx.coroutines.CoroutineScope(SupervisorJob() + Dispatchers.IO),
-            SharingStarted.Eagerly,
-            AppSettings(),
-        )
 
     override suspend fun setThemeMode(mode: ThemeMode) {
         dataStore.edit { preferences -> preferences[KEY_THEME_MODE] = mode.name }

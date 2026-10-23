@@ -17,6 +17,7 @@ activityCompose = "1.13.0"
 datastore = "1.2.1"
 navigationCompose = "2.10.2"
 
+
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

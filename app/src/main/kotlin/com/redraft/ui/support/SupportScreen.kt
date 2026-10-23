@@ -28,18 +28,10 @@ import androidx.compose.ui.platform.ClipEntry
 import androidx.compose.ui.platform.LocalClipboard
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.redraft.R
 import kotlinx.coroutines.launch
-
-/** Copy fixed by the UI contract (01.1-UI-SPEC § Support and § Errors). */
-private const val SUPPORT_MESSAGE =
-    "Redraft is free and open source, with no ads, no accounts, and nothing collected. " +
-        "If it saves you time, you can support its development — but every feature works " +
-        "exactly the same either way."
-private const val NO_LINKS = "No support links are set up in this build."
-private const val LINK_ERROR = "Couldn't open the link. No app on this device can handle it."
-private const val ADDRESS_COPIED = "Address copied"
 
 /**
  * Support/donations surface. External links only: no billing library, no gating, no nagging
@@ -56,17 +48,20 @@ fun SupportScreen(
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val links = remember { SupportLinks.configured(SupportLinks.supportLinks) }
+    val linkErrorMsg = stringResource(R.string.support_link_error)
+    val moneroAddressLabel = stringResource(R.string.support_monero_address)
+    val addressCopiedMsg = stringResource(R.string.support_address_copied)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Support Redraft") },
+                title = { Text(stringResource(R.string.support_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                         )
                     }
                 },
@@ -82,7 +77,7 @@ fun SupportScreen(
             item {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Text(
-                        text = SUPPORT_MESSAGE,
+                        text = stringResource(R.string.support_message),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.fillMaxWidth().padding(12.dp),
@@ -90,26 +85,26 @@ fun SupportScreen(
                 }
             }
 
-            item { SectionHeader("Ways to support") }
+            item { SectionHeader(stringResource(R.string.support_ways_to_support)) }
             item {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     if (links.isEmpty()) {
                         Text(
-                            text = NO_LINKS,
+                            text = stringResource(R.string.support_no_links),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.fillMaxWidth().padding(16.dp),
                         )
                     } else {
                         links.forEach { link ->
-                            val (iconRes, subtitle) = supportPresentation(link.label)
+                            val (iconRes, subtitleRes) = supportPresentation(link.label)
                             ListItem(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
                                         if (!openExternalLink(context, link.url)) {
                                             scope.launch {
-                                                snackbarHostState.showSnackbar(LINK_ERROR)
+                                                snackbarHostState.showSnackbar(linkErrorMsg)
                                             }
                                         }
                                     },
@@ -127,10 +122,10 @@ fun SupportScreen(
                                         style = MaterialTheme.typography.titleMedium,
                                     )
                                 },
-                                supportingContent = subtitle?.let { text ->
+                                supportingContent = subtitleRes?.let { res ->
                                     {
                                         Text(
-                                            text = text,
+                                            text = stringResource(res),
                                             style = MaterialTheme.typography.bodyMedium,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
@@ -151,7 +146,7 @@ fun SupportScreen(
             }
 
             if (SupportLinks.XMR_ADDRESS.isNotBlank()) {
-                item { SectionHeader("Crypto") }
+                item { SectionHeader(stringResource(R.string.support_crypto)) }
                 item {
                     Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                         ListItem(
@@ -162,12 +157,12 @@ fun SupportScreen(
                                         clipboard.setClipEntry(
                                             ClipEntry(
                                                 ClipData.newPlainText(
-                                                    "Monero address",
+                                                    moneroAddressLabel,
                                                     SupportLinks.XMR_ADDRESS,
                                                 ),
                                             ),
                                         )
-                                        snackbarHostState.showSnackbar(ADDRESS_COPIED)
+                                        snackbarHostState.showSnackbar(addressCopiedMsg)
                                     }
                                 },
                             leadingContent = {
@@ -180,7 +175,7 @@ fun SupportScreen(
                             },
                             headlineContent = {
                                 Text(
-                                    text = "Monero (XMR)",
+                                    text = stringResource(R.string.support_monero),
                                     style = MaterialTheme.typography.titleMedium,
                                 )
                             },
@@ -200,10 +195,10 @@ fun SupportScreen(
 }
 
 /** Curated icon + subtitle per known platform; unmapped labels get a neutral icon and no subtitle. */
-private fun supportPresentation(label: String): Pair<Int, String?> = when (label) {
-    "GitHub Sponsors" -> R.drawable.ic_heart to "Recurring monthly support"
-    "Buy Me a Coffee" -> R.drawable.ic_coffee to "One-time tip"
-    "PayPal" -> R.drawable.ic_paypal to "One-time tip"
+private fun supportPresentation(label: String): Pair<Int, Int?> = when (label) {
+    "GitHub Sponsors" -> R.drawable.ic_heart to R.string.support_subtitle_recurring
+    "Buy Me a Coffee" -> R.drawable.ic_coffee to R.string.support_subtitle_one_time
+    "PayPal" -> R.drawable.ic_paypal to R.string.support_subtitle_one_time
     else -> R.drawable.ic_open_in_new to null
 }
 

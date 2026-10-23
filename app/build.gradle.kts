@@ -29,12 +29,12 @@ android {
         // TODO(developer, D-27): settle the final applicationId before the first publish. Once
         // published it can never change without shipping a different app. `namespace` may stay
         // `com.redraft` even if the id becomes `com.<name>.redraft`.
-        applicationId = "com.redraft"
+        applicationId = "com.rhemnik.redraft"
         minSdk = 26
         targetSdk = 37
-        // 0.1.0 is the first release; versionCode must increase with every published build.
-        versionCode = 2
-        versionName = "0.1.0"
+        // 0.1.2 is the current release; versionCode must increase with every published build.
+        versionCode = 3
+        versionName = "0.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

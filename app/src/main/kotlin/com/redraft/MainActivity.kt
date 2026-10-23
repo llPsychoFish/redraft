@@ -11,10 +11,13 @@ import com.redraft.ui.nav.RedraftNavHost
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.theme.RedraftTheme
+import com.redraft.ui.theme.ThemeMode
+import com.redraft.data.AppSettings
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        
         if (BuildConfig.DEBUG) {
             StrictMode.setThreadPolicy(
                 StrictMode.ThreadPolicy.Builder()
@@ -34,10 +37,11 @@ class MainActivity : ComponentActivity() {
             val settingsViewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(this))
             val pdfViewerViewModel: PdfViewerViewModel = viewModel(factory = PdfViewerViewModel.factory(this))
             val settings = settingsViewModel.settings.collectAsStateWithLifecycle()
+            
             RedraftTheme(
-                themeMode = settings.value.themeMode,
-                dynamicColor = settings.value.dynamicColor,
-                amoled = settings.value.amoled,
+                themeMode = settings.value?.themeMode ?: ThemeMode.SYSTEM,
+                dynamicColor = settings.value?.dynamicColor ?: true,
+                amoled = settings.value?.amoled ?: false,
             ) {
                 RedraftNavHost(
                     settingsViewModel = settingsViewModel,
