@@ -60,7 +60,6 @@ import com.redraft.ui.settings.SettingsViewModel
 fun HomeScreen(
     viewModel: PdfViewerViewModel,
     settingsViewModel: SettingsViewModel,
-    onDocumentOpened: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -94,10 +93,6 @@ fun HomeScreen(
                 android.Manifest.permission.READ_EXTERNAL_STORAGE,
             )
         }
-    }
-
-    LaunchedEffect(Unit) {
-        viewModel.documentOpened.collect { onDocumentOpened() }
     }
 
     val errorMessage = uiState.error?.userMessage()

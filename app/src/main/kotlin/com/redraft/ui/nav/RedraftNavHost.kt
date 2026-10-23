@@ -48,13 +48,15 @@ fun RedraftNavHost(
 ) {
     val navController = rememberNavController()
     val viewModel: PdfViewerViewModel = pdfViewerViewModel
-    // If an incoming URI was provided (e.g., from "Open With"), navigate to it
-    LaunchedEffect(initialUri) {
-        initialUri?.let {
-            // Navigate to the PDF viewer with the given URI
-            navController.navigate(ROUTE_PDF_VIEWER + "?uri=" + it.toString())
+    
+    // Collect documentOpened events and navigate to viewer
+    LaunchedEffect(viewModel) {
+        while (true) {
+            viewModel.documentOpened.receive()
+            navController.navigate(ROUTE_VIEWER)
         }
     }
+
     val scope = rememberCoroutineScope()
 
     Surface(
@@ -96,7 +98,6 @@ fun RedraftNavHost(
                 HomeScreen(
                     viewModel = viewModel,
                     settingsViewModel = settingsViewModel,
-                    onDocumentOpened = { navController.navigate(ROUTE_VIEWER) },
                     onOpenSettings = { navController.navigate(ROUTE_SETTINGS) },
                 )
             }

@@ -21,12 +21,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
@@ -94,8 +93,8 @@ class PdfViewerViewModel(
     private val _handle = MutableStateFlow<DocumentHandle?>(null)
     val handle: StateFlow<DocumentHandle?> = _handle.asStateFlow()
 
-    private val _documentOpened = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val documentOpened: SharedFlow<Unit> = _documentOpened.asSharedFlow()
+    private val _documentOpened = Channel<Unit>(capacity = Channel.BUFFERED)
+    val documentOpened: ReceiveChannel<Unit> = _documentOpened
 
     val recents: StateFlow<List<RecentFile>> = recentsRepository.recents
         .onEach { _uiState.update { it.copy(isLoadingRecents = false) } }
@@ -273,7 +272,7 @@ class PdfViewerViewModel(
                                     lastPageIndex = targetPage,
                                 ),
                             )
-                            _documentOpened.tryEmit(Unit)
+                            _documentOpened.trySend(Unit)
                         },
                         onFailure = { throwable ->
                             _uiState.update {
