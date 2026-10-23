@@ -178,7 +178,7 @@ fun HomeScreen(
                         onOpen = {
                             viewModel.openRecent(
                                 file = file,
-                                startPage = if (settings.reopenAtLastPage) file.lastPageIndex else 0,
+                                startPage = if (settings?.reopenAtLastPage == true) file.lastPageIndex else 0,
                             )
                         },
                         onRemove = { viewModel.removeRecent(file) },

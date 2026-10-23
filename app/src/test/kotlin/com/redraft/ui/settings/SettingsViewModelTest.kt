@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Before
 import org.junit.Test
 
@@ -81,9 +82,19 @@ class SettingsViewModelTest {
 
         advanceUntilIdle()
 
-        assertEquals(ThemeMode.DARK, viewModel.settings.value.themeMode)
-        assertEquals(true, viewModel.settings.value.amoled)
-        assertEquals(true, viewModel.settings.value.keepScreenOn)
+        val settings = viewModel.settings.value!!
+        assertEquals(ThemeMode.DARK, settings.themeMode)
+        assertEquals(true, settings.amoled)
+        assertEquals(true, settings.keepScreenOn)
+    }
+
+    @Test
+    fun `settings are initially null before loading`() = runTest {
+        val store = FakeSettingsStore()
+        val viewModel = SettingsViewModel(store)
+
+        // Initially settings should be null until the flow emits
+        assertEquals(null, viewModel.settings.value)
     }
 
     @Test

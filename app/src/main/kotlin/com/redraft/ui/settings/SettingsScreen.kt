@@ -16,6 +16,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -62,7 +63,7 @@ fun SettingsScreen(
     val cacheSize by pdfViewerViewModel.cacheSizeBytes.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    val settingsState = settings
+    val settingsState = settings ?: AppSettings()
 
     LaunchedEffect(Unit) {
         pdfViewerViewModel.refreshCacheSize()
@@ -96,11 +97,11 @@ fun SettingsScreen(
                 item { DynamicColorSwitch(settingsState, settingsViewModel) }
             }
             item { AmoledSwitch(settingsState, settingsViewModel) }
-            item { Divider() }
+            item { HorizontalDivider() }
             item { SectionHeader("Viewer") }
             item { KeepScreenOnSwitch(settingsState, settingsViewModel) }
             item { ReopenAtLastPageSwitch(settingsState, settingsViewModel) }
-            item { Divider() }
+            item { HorizontalDivider() }
             item { SectionHeader("Storage") }
             item { ClearRecentsButton(onClear = { pdfViewerViewModel.clearRecents() }) }
             item {
@@ -112,7 +113,7 @@ fun SettingsScreen(
                     },
                 )
             }
-            item { Divider() }
+            item { HorizontalDivider() }
             item { SectionHeader("About") }
             item { NavigationRow(title = "About Redraft", onClick = onOpenAbout) }
             item { NavigationRow(title = "Support Redraft", onClick = onOpenSupport) }
@@ -174,7 +175,7 @@ private fun AmoledSwitch(settings: AppSettings, viewModel: SettingsViewModel) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .toggleable(value = settings.amoled, onValueChange = { if (!disabled) viewModel.setAmoled(it) })
+            .toggleable(value = settings.amoled, onValueChange = { if (!disabled) viewModel.setAmoled(it) }, enabled = !disabled)
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         Text(text = "AMOLED black", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
@@ -245,7 +246,7 @@ private fun ClearRecentsButton(onClear: () -> Unit) {
 private fun ClearCacheButton(cacheSize: Long?, onClear: () -> Unit) {
     ListItem(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).clickable(onClick = onClear),
-        leadingContent = { Icon(painter = painterResource(R.drawable.ic_storage), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        leadingContent = { Icon(painter = painterResource(R.drawable.ic_delete), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
         headlineContent = { Text(text = "Clear cache", style = MaterialTheme.typography.titleMedium) },
         supportingContent = {
             Text(

@@ -15,9 +15,9 @@ import kotlinx.coroutines.launch
 // SettingsViewModel with factory for DI (D-11, D-12)
 class SettingsViewModel(private val store: SettingsStore) : ViewModel() {
 
-    // Nullable StateFlow so the screen can distinguish "not yet loaded" from "loaded empty"
-    val settings: StateFlow<AppSettings> = store.settings
-        .stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
+    // StateFlow that distinguishes "not yet loaded" (null) from "loaded" (AppSettings)
+    val settings: StateFlow<AppSettings?> = store.settings
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun setThemeMode(mode: com.redraft.ui.theme.ThemeMode) {
         viewModelScope.launch { store.setThemeMode(mode) }

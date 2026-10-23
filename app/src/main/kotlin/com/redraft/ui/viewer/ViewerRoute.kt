@@ -25,6 +25,7 @@ import com.redraft.R
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
+import com.redraft.data.AppSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,8 +42,9 @@ fun ViewerRoute(
     // "Keep screen on while reading" is a real behaviour, not a stored preference: the window flag
     // is held only while a document is actually open, and released when the viewer leaves.
     val view = LocalView.current
-    DisposableEffect(view, settings.keepScreenOn, uiState.pageCount) {
-        view.keepScreenOn = settings.keepScreenOn && uiState.pageCount > 0
+    val keepScreenOn = settings?.keepScreenOn ?: false
+    DisposableEffect(view, keepScreenOn, uiState.pageCount) {
+        view.keepScreenOn = keepScreenOn && uiState.pageCount > 0
         onDispose { view.keepScreenOn = false }
     }
 
