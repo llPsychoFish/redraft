@@ -1,6 +1,5 @@
 package com.redraft.ui.viewer
 
-import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -37,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.redraft.R
 import com.redraft.ui.MIN_ZOOM
@@ -80,10 +80,7 @@ fun ViewerRoute(
 
     // Update system bars visibility when chrome visibility changes
     DisposableEffect(barsVisible) {
-        val statusBars = 1 // WindowInsetsControllerCompat.Type.STATUS_BARS
-        val navigationBars = 2 // WindowInsetsControllerCompat.Type.NAVIGATION_BARS
-        val systemBars = statusBars or navigationBars
-        @SuppressLint("WrongConstant")
+        val systemBars = WindowInsetsCompat.Type.systemBars()
         if (barsVisible) {
             // Show system bars
             insetsController.show(systemBars)
@@ -101,15 +98,8 @@ fun ViewerRoute(
 
     // Calculate top padding for the content (status bar height) in pixels
     val topPaddingPx = remember(view) {
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
-            val insets = view.rootWindowInsets
-            val statusBarsType = 1 // WindowInsetsCompat.Type.STATUS_BARS
-            insets.getInsets(statusBarsType).top.toFloat()
-        } else {
-            // Fallback for API < 30: use a reasonable default status bar height
-            val metrics = view.resources.displayMetrics
-            (metrics.heightPixels * 0.05f).toFloat() // ~5% of screen height
-        }
+        val insets = androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(view.rootWindowInsets, view)
+        insets.getInsets(WindowInsetsCompat.Type.statusBars()).top.toFloat()
     }
 
     Box(modifier = modifier.fillMaxSize()) {

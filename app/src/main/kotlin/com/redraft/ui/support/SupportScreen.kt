@@ -48,6 +48,9 @@ fun SupportScreen(
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
     val links = remember { SupportLinks.configured(SupportLinks.supportLinks) }
+    val linkErrorMsg = stringResource(R.string.support_link_error)
+    val moneroAddressLabel = stringResource(R.string.support_monero_address)
+    val addressCopiedMsg = stringResource(R.string.support_address_copied)
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -101,7 +104,7 @@ fun SupportScreen(
                                     .clickable {
                                         if (!openExternalLink(context, link.url)) {
                                             scope.launch {
-                                                snackbarHostState.showSnackbar(context.getString(R.string.support_link_error))
+                                                snackbarHostState.showSnackbar(linkErrorMsg)
                                             }
                                         }
                                     },
@@ -154,12 +157,12 @@ fun SupportScreen(
                                         clipboard.setClipEntry(
                                             ClipEntry(
                                                 ClipData.newPlainText(
-                                                    context.getString(R.string.support_monero_address),
+                                                    moneroAddressLabel,
                                                     SupportLinks.XMR_ADDRESS,
                                                 ),
                                             ),
                                         )
-                                        snackbarHostState.showSnackbar(context.getString(R.string.support_address_copied))
+                                        snackbarHostState.showSnackbar(addressCopiedMsg)
                                     }
                                 },
                             leadingContent = {

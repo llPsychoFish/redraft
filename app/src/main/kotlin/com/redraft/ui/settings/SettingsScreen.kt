@@ -62,7 +62,8 @@ fun SettingsScreen(
     onOpenSupport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val recentFilesClearedMsg = stringResource(R.string.settings_recent_files_cleared)
+    val cacheClearedMsg = stringResource(R.string.settings_cache_cleared)
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val cacheSize by pdfViewerViewModel.cacheSizeBytes.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -111,7 +112,7 @@ fun SettingsScreen(
             item { SectionHeader(stringResource(R.string.settings_section_storage)) }
             item { ClearRecentsButton(onClear = { 
                 pdfViewerViewModel.clearRecents()
-                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.settings_recent_files_cleared)) }
+                scope.launch { snackbarHostState.showSnackbar(recentFilesClearedMsg) }
             }) }
             item {
                 ClearCacheButton(
@@ -119,7 +120,7 @@ fun SettingsScreen(
                     onClear = {
                         pdfViewerViewModel.clearCaches()
                         pdfViewerViewModel.refreshCacheSize()
-                        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.settings_cache_cleared)) }
+                        scope.launch { snackbarHostState.showSnackbar(cacheClearedMsg) }
                     },
                 )
             }
