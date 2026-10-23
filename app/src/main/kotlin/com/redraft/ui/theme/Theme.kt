@@ -1,6 +1,8 @@
 package com.redraft.ui.theme
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
@@ -12,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -63,6 +66,16 @@ fun resolveColorScheme(
     }
 }
 
+/** Safely finds an Activity in the context hierarchy, returns null if not found (e.g., previews, tests). */
+fun findActivity(context: Context): Activity? {
+    var current: Context = context
+    while (current is ContextWrapper) {
+        if (current is Activity) return current
+        current = current.baseContext
+    }
+    return null
+}
+
 @Composable
 fun RedraftTheme(
     themeMode: ThemeMode,
@@ -78,6 +91,7 @@ fun RedraftTheme(
 
     val dynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
+    // Dynamic color schemes are stable and don't require remember; call directly on API 31+
     val dynamicLight = if (dynamicAvailable) dynamicLightColorScheme(LocalContext.current) else lightColorScheme
     val dynamicDark = if (dynamicAvailable) dynamicDarkColorScheme(LocalContext.current) else darkColorScheme
 
@@ -94,20 +108,25 @@ fun RedraftTheme(
     )
 
     // System bars handling (D-08) — on every scheme change
-    val activity = LocalContext.current as Activity
-    val insetsController = remember { WindowCompat.getInsetsController(activity.window, activity.window.decorView) }
+    val context = LocalContext.current
+    val activity = findActivity(context)
+    val insetsController = remember(activity) {
+        activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }
+    }
     // Use the darkTheme parameter to determine system bar icons since it matches the resolved scheme
     val isLightScheme = !darkTheme
 
     // Apply system bar icon colours on every scheme change
     androidx.compose.runtime.SideEffect {
-        insetsController.isAppearanceLightStatusBars = isLightScheme
-        insetsController.isAppearanceLightNavigationBars = isLightScheme
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            // API 26–28 only: set navigationBarColor to resolved background
-            activity.window.navigationBarColor = colorScheme.background.value.toInt()
+        insetsController?.apply {
+            isAppearanceLightStatusBars = isLightScheme
+            isAppearanceLightNavigationBars = isLightScheme
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1 && Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                // API 26–28 only: set navigationBarColor to resolved background
+                activity?.window?.navigationBarColor = colorScheme.background.toArgb()
+            }
+            // On API 29+ do NOT set navigationBarColor
         }
-        // On API 29+ do NOT set navigationBarColor
     }
 
     MaterialTheme(
