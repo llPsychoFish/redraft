@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -83,12 +84,12 @@ fun PageOverviewRoute(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Pages") },
+                title = { Text(stringResource(R.string.overview_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                         )
                     }
                 },

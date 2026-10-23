@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.redraft.BuildConfig
@@ -106,12 +107,12 @@ fun AboutScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("About Redraft") },
+                title = { Text(stringResource(R.string.about_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                         )
                     }
                 },
@@ -126,7 +127,7 @@ fun AboutScreen(
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
             ) {
-                Text("Support Redraft")
+                Text(stringResource(R.string.about_support_button))
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -148,7 +149,7 @@ fun AboutScreen(
                             modifier = Modifier.size(48.dp),
                             tint = Color.Unspecified,
                         )
-                        Text(text = "Redraft", style = MaterialTheme.typography.headlineMedium)
+                        Text(text = stringResource(R.string.about_app_name), style = MaterialTheme.typography.headlineMedium)
                         Text(
                             text = DESCRIPTION,
                             style = MaterialTheme.typography.bodyMedium,
@@ -164,7 +165,7 @@ fun AboutScreen(
                             shape = MaterialTheme.shapes.small,
                         ) {
                             Text(
-                                text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                                text = stringResource(R.string.about_version, BuildConfig.VERSION_NAME),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
@@ -174,15 +175,15 @@ fun AboutScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
-                            FeatureChip("Open source", R.drawable.ic_github)
-                            FeatureChip("Offline-first", R.drawable.ic_cloud_off)
-                            FeatureChip("No tracking", R.drawable.ic_shield)
+                            FeatureChip(stringResource(R.string.about_open_source), R.drawable.ic_github)
+                            FeatureChip(stringResource(R.string.about_offline_first), R.drawable.ic_cloud_off)
+                            FeatureChip(stringResource(R.string.about_no_tracking), R.drawable.ic_shield)
                         }
                     }
                 }
             }
 
-            item { SectionHeader("Links") }
+            item { SectionHeader(stringResource(R.string.about_links_section)) }
             item {
                 Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
                     Column {
@@ -191,7 +192,7 @@ fun AboutScreen(
                             leadingContent = { LeadingIcon(R.drawable.ic_article) },
                             headlineContent = {
                                 Text(
-                                    text = "Open-source licences",
+                                    text = stringResource(R.string.about_licences_title),
                                     style = MaterialTheme.typography.titleMedium,
                                 )
                             },
@@ -201,7 +202,7 @@ fun AboutScreen(
                             modifier = Modifier.fillMaxWidth().clickable { showLicenceText = true },
                             leadingContent = { LeadingIcon(R.drawable.ic_gavel) },
                             headlineContent = {
-                                Text(text = "Licence", style = MaterialTheme.typography.titleMedium)
+                                Text(text = stringResource(R.string.about_licence_title), style = MaterialTheme.typography.titleMedium)
                             },
                             trailingContent = { Chevron() },
                         )
@@ -209,7 +210,7 @@ fun AboutScreen(
                             modifier = Modifier.fillMaxWidth().clickable { showPrivacy = true },
                             leadingContent = { LeadingIcon(R.drawable.ic_shield) },
                             headlineContent = {
-                                Text(text = "Privacy", style = MaterialTheme.typography.titleMedium)
+                                Text(text = stringResource(R.string.about_privacy_title), style = MaterialTheme.typography.titleMedium)
                             },
                             trailingContent = { Chevron() },
                         )
@@ -243,8 +244,7 @@ fun AboutScreen(
 
             item {
                 Text(
-                    text = "Redraft v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE}) " +
-                        "— MIT licence",
+                    text = stringResource(R.string.about_version_footer, BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
@@ -257,7 +257,7 @@ fun AboutScreen(
     if (showLicences) {
         AlertDialog(
             onDismissRequest = { showLicences = false },
-            title = { Text("Open-source licences") },
+            title = { Text(stringResource(R.string.about_licences_title)) },
             text = {
                 Column {
                     Text(
@@ -275,7 +275,7 @@ fun AboutScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showLicences = false }) { Text("Close") }
+                TextButton(onClick = { showLicences = false }) { Text(stringResource(R.string.close)) }
             },
         )
     }
@@ -283,7 +283,7 @@ fun AboutScreen(
     if (showLicenceText) {
         AlertDialog(
             onDismissRequest = { showLicenceText = false },
-            title = { Text("MIT licence") },
+            title = { Text(stringResource(R.string.about_licence_mit_title)) },
             text = {
                 LazyColumn(modifier = Modifier.height(320.dp)) {
                     item {
@@ -292,7 +292,7 @@ fun AboutScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showLicenceText = false }) { Text("Close") }
+                TextButton(onClick = { showLicenceText = false }) { Text(stringResource(R.string.close)) }
             },
         )
     }
@@ -300,7 +300,7 @@ fun AboutScreen(
     if (showPrivacy) {
         AlertDialog(
             onDismissRequest = { showPrivacy = false },
-            title = { Text("Privacy") },
+            title = { Text(stringResource(R.string.about_privacy_title)) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(text = PRIVACY_1, style = MaterialTheme.typography.bodyMedium)
@@ -308,7 +308,7 @@ fun AboutScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showPrivacy = false }) { Text("Close") }
+                TextButton(onClick = { showPrivacy = false }) { Text(stringResource(R.string.close)) }
             },
         )
     }

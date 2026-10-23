@@ -3,6 +3,7 @@ package com.redraft.ui.settings
 import android.os.Build
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -39,6 +40,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +62,7 @@ fun SettingsScreen(
     onOpenSupport: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val cacheSize by pdfViewerViewModel.cacheSizeBytes.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -75,12 +79,12 @@ fun SettingsScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                         )
                     }
                 },
@@ -93,21 +97,21 @@ fun SettingsScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxSize(),
         ) {
-            item { SectionHeader("Appearance") }
+            item { SectionHeader(stringResource(R.string.settings_section_appearance)) }
             item { ThemeModeRadioGroup(settingsState, settingsViewModel) }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 item { DynamicColorSwitch(settingsState, settingsViewModel) }
             }
             item { AmoledSwitch(settingsState, settingsViewModel, snackbarHostState) }
             item { HorizontalDivider() }
-            item { SectionHeader("Viewer") }
+            item { SectionHeader(stringResource(R.string.settings_section_viewer)) }
             item { KeepScreenOnSwitch(settingsState, settingsViewModel) }
             item { ReopenAtLastPageSwitch(settingsState, settingsViewModel) }
             item { HorizontalDivider() }
-            item { SectionHeader("Storage") }
+            item { SectionHeader(stringResource(R.string.settings_section_storage)) }
             item { ClearRecentsButton(onClear = { 
                 pdfViewerViewModel.clearRecents()
-                scope.launch { snackbarHostState.showSnackbar("Recent files cleared") }
+                scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.settings_recent_files_cleared)) }
             }) }
             item {
                 ClearCacheButton(
@@ -115,14 +119,14 @@ fun SettingsScreen(
                     onClear = {
                         pdfViewerViewModel.clearCaches()
                         pdfViewerViewModel.refreshCacheSize()
-                        scope.launch { snackbarHostState.showSnackbar("Cache cleared") }
+                        scope.launch { snackbarHostState.showSnackbar(context.getString(R.string.settings_cache_cleared)) }
                     },
                 )
             }
             item { HorizontalDivider() }
-            item { SectionHeader("About") }
-            item { NavigationRow(title = "About Redraft", onClick = onOpenAbout) }
-            item { NavigationRow(title = "Support Redraft", onClick = onOpenSupport) }
+            item { SectionHeader(stringResource(R.string.settings_section_about)) }
+            item { NavigationRow(title = stringResource(R.string.settings_about_redraft), onClick = onOpenAbout) }
+            item { NavigationRow(title = stringResource(R.string.settings_support_redraft), onClick = onOpenSupport) }
         }
     }
 }
@@ -138,14 +142,15 @@ private fun SectionHeader(title: String) {
 
 @Composable
 private fun ThemeModeRadioGroup(settings: AppSettings, viewModel: SettingsViewModel) {
-    val modes = listOf<Pair<ThemeMode, String>>(
-        ThemeMode.SYSTEM to "System",
-        ThemeMode.LIGHT to "Light",
-        ThemeMode.DARK to "Dark",
+    val modes = listOf(
+        ThemeMode.SYSTEM to stringResource(R.string.settings_system),
+        ThemeMode.LIGHT to stringResource(R.string.settings_light),
+        ThemeMode.DARK to stringResource(R.string.settings_dark),
     )
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
+            .selectableGroup()
     ) {
         for (i in 0 until modes.size) {
             val mode = modes[i].first
@@ -153,7 +158,11 @@ private fun ThemeModeRadioGroup(settings: AppSettings, viewModel: SettingsViewMo
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .selectable(selected = settings.themeMode == mode, onClick = { viewModel.setThemeMode(mode) })
+                    .selectable(
+                        selected = settings.themeMode == mode,
+                        onClick = { viewModel.setThemeMode(mode) },
+                        role = Role.RadioButton,
+                    )
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 RadioButton(selected = settings.themeMode == mode, onClick = null)
@@ -172,11 +181,15 @@ private fun DynamicColorSwitch(settings: AppSettings, viewModel: SettingsViewMod
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .toggleable(value = settings.dynamicColor, onValueChange = { viewModel.setDynamicColor(it) })
+            .toggleable(
+                value = settings.dynamicColor,
+                onValueChange = { viewModel.setDynamicColor(it) },
+                role = Role.Switch,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = "Dynamic colour", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Text(text = stringResource(R.string.settings_dynamic_colour), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         Switch(checked = settings.dynamicColor, onCheckedChange = null)
     }
 }
@@ -187,15 +200,20 @@ private fun AmoledSwitch(settings: AppSettings, viewModel: SettingsViewModel, sn
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .toggleable(value = settings.amoled, onValueChange = { if (!disabled) viewModel.setAmoled(it) }, enabled = !disabled)
+            .toggleable(
+                value = settings.amoled,
+                onValueChange = { if (!disabled) viewModel.setAmoled(it) },
+                enabled = !disabled,
+                role = Role.Switch,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = "AMOLED black", style = MaterialTheme.typography.titleMedium)
+            Text(text = stringResource(R.string.settings_amoled_black), style = MaterialTheme.typography.titleMedium)
             if (disabled) {
                 Text(
-                    text = "Turn off Dynamic colour to use AMOLED black",
+                    text = stringResource(R.string.settings_amoled_disabled_text),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
                 )
@@ -210,11 +228,15 @@ private fun KeepScreenOnSwitch(settings: AppSettings, viewModel: SettingsViewMod
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .toggleable(value = settings.keepScreenOn, onValueChange = { viewModel.setKeepScreenOn(it) })
+            .toggleable(
+                value = settings.keepScreenOn,
+                onValueChange = { viewModel.setKeepScreenOn(it) },
+                role = Role.Switch,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = "Keep screen on while reading", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Text(text = stringResource(R.string.settings_keep_screen_on), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         Switch(checked = settings.keepScreenOn, onCheckedChange = null)
     }
 }
@@ -224,11 +246,15 @@ private fun ReopenAtLastPageSwitch(settings: AppSettings, viewModel: SettingsVie
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .toggleable(value = settings.reopenAtLastPage, onValueChange = { viewModel.setReopenAtLastPage(it) })
+            .toggleable(
+                value = settings.reopenAtLastPage,
+                onValueChange = { viewModel.setReopenAtLastPage(it) },
+                role = Role.Switch,
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(text = "Reopen at the last page", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+        Text(text = stringResource(R.string.settings_reopen_at_last_page), style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
         Switch(checked = settings.reopenAtLastPage, onCheckedChange = null)
     }
 }
@@ -243,27 +269,24 @@ private fun ClearRecentsButton(onClear: () -> Unit) {
             .padding(vertical = 4.dp)
             .clickable { confirming = true },
         leadingContent = { Icon(painter = painterResource(R.drawable.ic_storage), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        headlineContent = { Text(text = "Clear list", style = MaterialTheme.typography.titleMedium) }
+        headlineContent = { Text(text = stringResource(R.string.settings_clear_list), style = MaterialTheme.typography.titleMedium) }
     )
 
     if (confirming) {
         AlertDialog(
             onDismissRequest = { confirming = false },
-            title = { Text("Remove recent files?") },
+            title = { Text(stringResource(R.string.settings_clear_list_dialog_title)) },
             text = {
-                Text(
-                    "This removes the recent-files list from this device. " +
-                        "The files themselves are not deleted."
-                )
+                Text(stringResource(R.string.settings_clear_list_dialog_message))
             },
             confirmButton = {
                 TextButton(onClick = {
                     confirming = false
                     onClear()
-                }) { Text("Remove") }
+                }) { Text(stringResource(R.string.remove)) }
             },
             dismissButton = {
-                TextButton(onClick = { confirming = false }) { Text("Not now") }
+                TextButton(onClick = { confirming = false }) { Text(stringResource(R.string.not_now)) }
             },
         )
     }
@@ -277,10 +300,10 @@ private fun ClearCacheButton(cacheSize: Long?, onClear: () -> Unit) {
             .padding(vertical = 4.dp)
             .clickable(onClick = onClear),
         leadingContent = { Icon(painter = painterResource(R.drawable.ic_delete), contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        headlineContent = { Text(text = "Clear cache", style = MaterialTheme.typography.titleMedium) },
+        headlineContent = { Text(text = stringResource(R.string.settings_clear_cache), style = MaterialTheme.typography.titleMedium) },
         supportingContent = {
             Text(
-                text = "Cached pages and thumbnails: ${formatCacheSize(cacheSize)}",
+                text = stringResource(R.string.settings_cache_size, formatCacheSize(cacheSize)),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }

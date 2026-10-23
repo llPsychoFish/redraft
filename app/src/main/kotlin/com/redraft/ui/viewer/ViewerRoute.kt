@@ -1,5 +1,6 @@
 package com.redraft.ui.viewer
 
+import android.annotation.SuppressLint
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,7 +69,8 @@ fun ViewerRoute(
     // System bars controller for immersive mode
     val insetsController = remember(view) {
         val activity = (context as? android.app.Activity)
-        val window = activity?.window ?: context.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.Window
+        val window = activity?.window
+            ?: throw IllegalStateException("Unable to get Window for insets controller")
         WindowCompat.getInsetsController(window, view)
     }
 
@@ -80,6 +83,7 @@ fun ViewerRoute(
         val statusBars = 1 // WindowInsetsControllerCompat.Type.STATUS_BARS
         val navigationBars = 2 // WindowInsetsControllerCompat.Type.NAVIGATION_BARS
         val systemBars = statusBars or navigationBars
+        @SuppressLint("WrongConstant")
         if (barsVisible) {
             // Show system bars
             insetsController.show(systemBars)
@@ -97,9 +101,15 @@ fun ViewerRoute(
 
     // Calculate top padding for the content (status bar height) in pixels
     val topPaddingPx = remember(view) {
-        val insets = view.rootWindowInsets
-        val statusBarsType = 1 // WindowInsetsCompat.Type.STATUS_BARS
-        insets.getInsets(statusBarsType).top.toFloat()
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            val insets = view.rootWindowInsets
+            val statusBarsType = 1 // WindowInsetsCompat.Type.STATUS_BARS
+            insets.getInsets(statusBarsType).top.toFloat()
+        } else {
+            // Fallback for API < 30: use a reasonable default status bar height
+            val metrics = view.resources.displayMetrics
+            (metrics.heightPixels * 0.05f).toFloat() // ~5% of screen height
+        }
     }
 
     Box(modifier = modifier.fillMaxSize()) {
@@ -134,14 +144,14 @@ fun ViewerRoute(
                     IconButton(onClick = onBack) {
                         Icon(
                             painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = "Back",
+                            contentDescription = stringResource(R.string.cd_back),
                         )
                     }
                 },
                 actions = {
                     if (uiState.pageCount > 0) {
                         Text(
-                            text = "${uiState.visiblePageIndex + 1} / ${uiState.pageCount}",
+                            text = stringResource(R.string.viewer_page_counter, uiState.visiblePageIndex + 1, uiState.pageCount),
                             style = MaterialTheme.typography.bodyMedium,
                             modifier = Modifier.padding(horizontal = 8.dp),
                         )
@@ -157,13 +167,13 @@ fun ViewerRoute(
                     ) {
                         Icon(
                             painter = painterResource(R.drawable.ic_fit_width),
-                            contentDescription = "Fit width",
+                            contentDescription = stringResource(R.string.cd_fit_width),
                         )
                     }
                     IconButton(onClick = onOpenOverview) {
                         Icon(
                             painter = painterResource(R.drawable.ic_grid_view),
-                            contentDescription = "Page overview",
+                            contentDescription = stringResource(R.string.cd_page_overview),
                         )
                     }
                 },
