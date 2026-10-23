@@ -1,12 +1,22 @@
 package com.redraft.ui.viewer
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
@@ -15,12 +25,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import com.redraft.R
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
@@ -38,80 +53,121 @@ fun ViewerRoute(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val view = LocalView.current
 
     // "Keep screen on while reading" is a real behaviour, not a stored preference: the window flag
     // is held only while a document is actually open, and released when the viewer leaves.
-    val view = LocalView.current
     val keepScreenOn = settings?.keepScreenOn ?: false
     DisposableEffect(view, keepScreenOn, uiState.pageCount) {
         view.keepScreenOn = keepScreenOn && uiState.pageCount > 0
         onDispose { view.keepScreenOn = false }
     }
 
+    // System bars controller for immersive mode
+    val insetsController = remember(view) {
+        val activity = (context as? android.app.Activity)
+        val window = activity?.window ?: context.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.Window
+        WindowCompat.getInsetsController(window, view)
+    }
+
     // Tap toggles the chrome. The tap is deferred by the double-tap window inside
     // singlePointerDoubleTap, so a double tap still zooms instead of flashing the bars.
     var barsVisible by remember { mutableStateOf(true) }
 
-    Scaffold(
-        modifier = modifier.fillMaxSize(),
-        topBar = {
-            if (barsVisible) {
-                TopAppBar(
-                    title = {
-                        Text(
-                            text = uiState.documentName.orEmpty(),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_arrow_back),
-                                contentDescription = "Back",
-                            )
-                        }
-                    },
-                    actions = {
-                        if (uiState.pageCount > 0) {
-                            Text(
-                                text = "${uiState.visiblePageIndex + 1} / ${uiState.pageCount}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.padding(horizontal = 8.dp),
-                            )
-                        }
-                        // Fit width is the zoom floor, so the control is only meaningful
-                        // while the reader is zoomed in.
-                        IconButton(
-                            onClick = {
-                                viewModel.onZoomChanged(MIN_ZOOM)
-                                viewModel.onPanChanged(0f)
-                            },
-                            enabled = uiState.zoom > MIN_ZOOM,
-                        ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_fit_width),
-                                contentDescription = "Fit width",
-                            )
-                        }
-                        IconButton(onClick = onOpenOverview) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_grid_view),
-                                contentDescription = "Page overview",
-                            )
-                        }
-                    },
-                )
-            }
-        },
-    ) { padding ->
+    // Update system bars visibility when chrome visibility changes
+    DisposableEffect(barsVisible) {
+        val statusBars = 1 // WindowInsetsControllerCompat.Type.STATUS_BARS
+        val navigationBars = 2 // WindowInsetsControllerCompat.Type.NAVIGATION_BARS
+        val systemBars = statusBars or navigationBars
+        if (barsVisible) {
+            // Show system bars
+            insetsController.show(systemBars)
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        } else {
+            // Hide system bars
+            insetsController.hide(systemBars)
+        }
+        onDispose {
+            // Restore system bars when leaving the viewer
+            insetsController.show(systemBars)
+            insetsController.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        }
+    }
+
+    // Calculate top padding for the content (status bar height) in pixels
+    val topPaddingPx = remember(view) {
+        val insets = view.rootWindowInsets
+        val statusBarsType = 1 // WindowInsetsCompat.Type.STATUS_BARS
+        insets.getInsets(statusBarsType).top.toFloat()
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        // Content - PdfViewerScreen takes full screen
         PdfViewerScreen(
             viewModel = viewModel,
             settingsViewModel = settingsViewModel,
             onSingleTap = { barsVisible = !barsVisible },
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
+            modifier = Modifier.fillMaxSize(),
         )
+
+        // Overlay TopAppBar with animation
+        AnimatedVisibility(
+            visible = barsVisible,
+            enter = fadeIn(animationSpec = tween(200, easing = FastOutSlowInEasing)) +
+                slideInVertically(initialOffsetY = { -it }, animationSpec = tween(200, easing = FastOutSlowInEasing)),
+            exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) +
+                slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(150, easing = FastOutSlowInEasing)),
+        ) {
+            TopAppBar(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = androidx.compose.ui.platform.LocalDensity.current.run { topPaddingPx.toDp() }),
+                title = {
+                    Text(
+                        text = uiState.documentName.orEmpty(),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_arrow_back),
+                            contentDescription = "Back",
+                        )
+                    }
+                },
+                actions = {
+                    if (uiState.pageCount > 0) {
+                        Text(
+                            text = "${uiState.visiblePageIndex + 1} / ${uiState.pageCount}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                        )
+                    }
+                    // Fit width is the zoom floor, so the control is only meaningful
+                    // while the reader is zoomed in.
+                    IconButton(
+                        onClick = {
+                            viewModel.onZoomChanged(MIN_ZOOM)
+                            viewModel.onPanChanged(0f)
+                        },
+                        enabled = uiState.zoom > MIN_ZOOM,
+                    ) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_fit_width),
+                            contentDescription = "Fit width",
+                        )
+                    }
+                    IconButton(onClick = onOpenOverview) {
+                        Icon(
+                            painter = painterResource(R.drawable.ic_grid_view),
+                            contentDescription = "Page overview",
+                        )
+                    }
+                },
+            )
+        }
     }
 }
