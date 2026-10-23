@@ -60,7 +60,6 @@ import com.redraft.ui.settings.SettingsViewModel
 fun HomeScreen(
     viewModel: PdfViewerViewModel,
     settingsViewModel: SettingsViewModel,
-    onDocumentOpened: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -78,10 +77,22 @@ fun HomeScreen(
             viewModel.open(it.toString())
         }
     }
+    val storagePermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        // Permission result handled; UI adapts based on grant state
+    }
     val launchPicker = { openLauncher.launch(SafDocumentOpener.openPdfMimeTypes) }
 
+    // Request READ_EXTERNAL_STORAGE on first launch if API >= 33 (S+).
+    // This mirrors the existing OpenDocument launcher pattern and ensures the app
+    // can access PDFs long-pressed from other apps.
     LaunchedEffect(Unit) {
-        viewModel.documentOpened.collect { onDocumentOpened() }
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+            storagePermissionLauncher.launch(
+                android.Manifest.permission.READ_EXTERNAL_STORAGE,
+            )
+        }
     }
 
     val errorMessage = uiState.error?.userMessage()

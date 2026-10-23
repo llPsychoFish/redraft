@@ -1,6 +1,10 @@
 package com.redraft.ui.nav
 
+import android.net.Uri
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -28,6 +32,7 @@ import com.redraft.ui.viewer.ViewerRoute
 import kotlinx.coroutines.launch
 
 const val ROUTE_HOME = "home"
+const val ROUTE_PDF_VIEWER = "pdfViewer"
 const val ROUTE_VIEWER = "viewer"
 const val ROUTE_OVERVIEW = "overview"
 const val ROUTE_SETTINGS = "settings"
@@ -39,9 +44,27 @@ fun RedraftNavHost(
     modifier: Modifier = Modifier,
     settingsViewModel: SettingsViewModel,
     pdfViewerViewModel: PdfViewerViewModel,
+    initialUri: Uri? = null,
 ) {
     val navController = rememberNavController()
     val viewModel: PdfViewerViewModel = pdfViewerViewModel
+    
+    // Collect documentOpened events and navigate to viewer.
+    // Lives here, not in HomeScreen: a document can be opened while Home is not on screen
+    // (an "Open with" arriving while Settings or the viewer is showing), and from a cold start
+    // before Home has composed.
+    LaunchedEffect(viewModel) {
+        viewModel.documentOpened.collect {
+            val current = navController.currentDestination?.route
+            if (current != ROUTE_VIEWER) {
+                navController.navigate(ROUTE_VIEWER) {
+                    popUpTo(ROUTE_HOME) { inclusive = false }
+                    launchSingleTop = true
+                }
+            }
+        }
+    }
+
     val scope = rememberCoroutineScope()
 
     Surface(
@@ -83,16 +106,26 @@ fun RedraftNavHost(
                 HomeScreen(
                     viewModel = viewModel,
                     settingsViewModel = settingsViewModel,
-                    onDocumentOpened = { navController.navigate(ROUTE_VIEWER) },
                     onOpenSettings = { navController.navigate(ROUTE_SETTINGS) },
                 )
             }
-            composable(ROUTE_VIEWER) {
+composable(ROUTE_VIEWER) {
                 ViewerRoute(
                     viewModel = viewModel,
                     settingsViewModel = settingsViewModel,
                     onBack = { navController.popBackStack() },
                     onOpenOverview = { navController.navigate(ROUTE_OVERVIEW) },
+                )
+            }
+            composable(route = ROUTE_PDF_VIEWER) { backStackEntry ->
+                val uriString = backStackEntry.arguments?.getString("uri") ?: ""
+                val uri = Uri.parse(uriString)
+                ViewerRoute(
+                    viewModel = viewModel,
+                    settingsViewModel = settingsViewModel,
+                    onBack = { navController.popBackStack() },
+                    onOpenOverview = { navController.navigate(ROUTE_OVERVIEW) },
+                    initialUri = uri
                 )
             }
             composable(

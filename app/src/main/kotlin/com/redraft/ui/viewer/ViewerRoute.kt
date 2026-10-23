@@ -1,5 +1,6 @@
 package com.redraft.ui.viewer
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
@@ -11,9 +12,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,6 +49,8 @@ import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.data.AppSettings
 
+private val TopBarHeight = 64.dp
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewerRoute(
@@ -53,6 +59,7 @@ fun ViewerRoute(
     onBack: () -> Unit,
     onOpenOverview: () -> Unit,
     modifier: Modifier = Modifier,
+    initialUri: Uri? = null,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
@@ -97,11 +104,10 @@ fun ViewerRoute(
         }
     }
 
-    // Calculate top padding for the content (status bar height) in pixels
-    val topPaddingPx = remember(view) {
-        val insets = androidx.core.view.WindowInsetsCompat.toWindowInsetsCompat(view.rootWindowInsets, view)
-        insets.getInsets(WindowInsetsCompat.Type.statusBars()).top.toFloat()
-    }
+    // The bar floats over the list, so the list reserves exactly its height: status bar + app bar.
+    // Reserved even while the bar is hidden, so toggling the chrome never shifts the page.
+    val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val topBarSpace = statusBarTop + TopBarHeight
 
     Box(modifier = modifier.fillMaxSize()) {
         // Content - PdfViewerScreen takes full screen
@@ -109,6 +115,7 @@ fun ViewerRoute(
             viewModel = viewModel,
             settingsViewModel = settingsViewModel,
             onSingleTap = { barsVisible = !barsVisible },
+            topContentPadding = topBarSpace,
             modifier = Modifier.fillMaxSize(),
         )
 
@@ -121,10 +128,11 @@ fun ViewerRoute(
                 slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(150, easing = FastOutSlowInEasing)),
         ) {
             TopAppBar(
+                // TopAppBar already pads itself for the status bar; the old extra manual
+                // padding doubled it and made the bar taller than the space reserved for it.
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(top = androidx.compose.ui.platform.LocalDensity.current.run { topPaddingPx.toDp() }),
+                    .background(MaterialTheme.colorScheme.surface),
                 title = {
                     Text(
                         text = uiState.documentName.orEmpty(),
