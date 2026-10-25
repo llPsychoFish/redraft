@@ -54,7 +54,6 @@ import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -203,15 +202,14 @@ private fun Modifier.zoomInput(
         // and only consume once both are down, leaving single-finger drags to the list.
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
-            val downPosition = down.position
             val pointerId = down.id
-            // The horizontal-pan mode is decided ONCE per gesture: a drag that
+            // The horizontal-pan mode is decided ONCE per segment: a drag that
             // changes direction halfway through must not flip modes.
-            var horizontalDrag = false
-            var lastPanDx = 0f
+            var panState = panSegmentStart(down.position.x, down.position.y)
+            // True while the current gesture is a pinch; the first single-pointer
+            // frame afterwards starts a fresh segment at the remaining finger.
+            var wasPinching = false
             var previousPair: TouchPair? = null
-            // Track the last known pointer position for incremental pan delta.
-            var lastPosition = downPosition
             try {
                 while (true) {
                     val event = awaitPointerEvent()
@@ -220,8 +218,8 @@ private fun Modifier.zoomInput(
                     if (pressed.size >= 2) {
                         // The pinch takes over: the leftover horizontal state must
                         // not be applied later.
-                        horizontalDrag = false
-                        lastPanDx = 0f
+                        panState = panState.copy(horizontal = false)
+                        wasPinching = true
                         // The gesture owns the scroll position from here on: the
                         // scroll-restore effect must not fight the focal anchoring.
                         viewModel.onGestureActiveChanged(true)
@@ -289,47 +287,34 @@ private fun Modifier.zoomInput(
                         // direction halfway through.
                         previousPair = null
                         val zoom = viewModel.uiState.value.zoom
+                        val resumedAfterPinch = wasPinching
+                        wasPinching = false
                         if (zoom > MIN_ZOOM) {
-                            val change = event.changes.firstOrNull { it.id == pointerId }
-                                ?: event.changes.first()
-                            // Track previous position for incremental delta.
-                            val dx = change.position.x - lastPosition.x
-                            lastPosition = change.position
-                            val dy = change.position.y - downPosition.y
-                            if (!horizontalDrag) {
-                                if (abs(dx) > viewConfiguration.touchSlop &&
-                                    abs(dx) > abs(dy)
-                                ) {
-                                    horizontalDrag = true
-                                    // The pan is incremental: the delta applied from
-                                    // now on is the CHANGE since the last frame, so
-                                    // the page does not jump by the whole drag
-                                    // distance on the first panned frame.
-                                    lastPanDx = dx
-                                    // Take over the gesture: stop the list from scrolling.
-                                    change.consume()
-                                }
-                            } else {
-                                // Already panning: apply the horizontal delta and keep the
-                                // gesture away from the list scroll.
-                                //
-                                // At a boundary the page cannot move any further in this
-                                // direction, so the gesture is RELEASED instead of
-                                // swallowed: the change is not consumed, the pan stays
-                                // where it is, and the LazyColumn's own detector can
-                                // take the gesture back. Consuming it unconditionally
-                                // would lock the user into a horizontal drag that does
-                                // nothing.
-                                val requested = viewModel.uiState.value.panX + dx - lastPanDx
-                                val clamped = clampPanX(requested, viewportWidthPx.toFloat(), zoom)
-                                if (panWouldMove(requested, viewportWidthPx.toFloat(), zoom)) {
-                                    change.consume()
-                                    viewModel.onPanChanged(clamped)
-                                }
-                                // The delta is tracked either way, so that reversing
-                                // direction at a boundary resumes the pan on the very
-                                // next frame without a jump.
-                                lastPanDx = dx
+                            // Prefer the original pointer, but it may be the one lifted at the
+                            // end of the pinch: fall back to a PRESSED change, never a lifted
+                            // one, or the next delta spans both fingers and jumps the page.
+                            val change = pressed.firstOrNull { it.id == pointerId }
+                                ?: pressed.first()
+                            if (resumedAfterPinch) {
+                                // The pointer that remains after a pinch is at a new
+                                // place: start a fresh segment here so the first delta
+                                // is measured from this position, not from before the
+                                // pinch.
+                                panState = panSegmentStart(change.position.x, change.position.y)
+                            }
+                            val frame = panFrame(
+                                state = panState,
+                                panX = viewModel.uiState.value.panX,
+                                x = change.position.x,
+                                y = change.position.y,
+                                touchSlop = viewConfiguration.touchSlop,
+                                viewportWidthPx = viewportWidthPx.toFloat(),
+                                zoom = zoom,
+                            )
+                            panState = frame.state
+                            if (frame.consume) {
+                                change.consume()
+                                viewModel.onPanChanged(frame.panX)
                             }
                         }
                     }

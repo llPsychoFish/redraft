@@ -84,10 +84,14 @@ fun clampPanX(panX: Float, viewportWidthPx: Float, zoom: Float): Float =
  * Whether a requested pan actually moves the page.
  *
  * False means the pan is already at a boundary and the request pushes
- * further out - the page cannot move any further in that direction. The
- * caller uses this to decide whether to keep consuming the gesture: at a
- * boundary the gesture must be released so the list scroll can take it
- * (the edge lock of a nested pan/scroll pair).
+ * further out - the page cannot move any further in that direction.
+ *
+ * The one-finger pan reducer ([PanGestureMath.panFrame]) now owns the
+ * consume/release decision; this predicate remains the tested reference
+ * for the boundary. The reducer deliberately does NOT call it: it consumes
+ * the frame that reaches an edge (and applies the clamped pan), whereas
+ * this predicate returns false for an in-bounds request beyond the bound,
+ * which would release that edge-reaching frame.
  */
 fun panWouldMove(
     requestedPanX: Float,
