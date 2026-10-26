@@ -13,21 +13,7 @@ import kotlinx.coroutines.ensureActive
  */
 const val MAX_CHARS_PER_PAGE = 50_000
 
-/**
- * Result of extracting one page as plain data: no native handles, no text-page
- * objects, no bitmaps, no Android types may cross this boundary (D-23, D-03).
- */
-sealed interface PageTextLayout {
-    data class Ready(val layout: TextPageLayout) : PageTextLayout
-    data object Empty : PageTextLayout
-    data object Failed : PageTextLayout
-}
-
-/** Everything the reducer needs from one page, as plain data. */
-data class TextPageLayout(
-    val pageIndex: Int,
-    val chars: List<CharBox>,
-)
+// TextPageLayout, PageTextLayout, and reducedLines live in TextPageLayout.kt
 
 /**
  * Normalise a binding rect: pairs (left, right) and (top, bottom) per axis with

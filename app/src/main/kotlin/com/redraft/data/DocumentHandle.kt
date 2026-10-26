@@ -5,6 +5,7 @@ import com.redraft.pdfcore.PdfAssetLoader
 import com.redraft.pdfcore.PdfDocumentSource
 import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfcore.PdfDocumentHandle as PdfCoreDocumentHandle
+import io.legere.pdfiumandroid.suspend.PdfDocumentKt
 
 interface DocumentHandle {
     val pageCount: Int
@@ -12,6 +13,8 @@ interface DocumentHandle {
     suspend fun pageSize(index: Int): PdfPageGeometry
     suspend fun renderPage(index: Int, targetWidthPx: Int, targetHeightPx: Int): Bitmap
     suspend fun close()
+    /** The underlying Pdfium document, needed by text extraction. */
+    val document: PdfDocumentKt
 }
 
 class PdfiumDocumentHandle : DocumentHandle {
@@ -20,6 +23,9 @@ class PdfiumDocumentHandle : DocumentHandle {
 
     override var pageCount: Int = 0
         private set
+
+    override val document: PdfDocumentKt
+        get() = requireDelegate().document
 
     override suspend fun open(source: PdfDocumentSource) {
         val opened = PdfAssetLoader.open(source)

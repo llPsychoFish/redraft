@@ -17,8 +17,10 @@ import kotlinx.coroutines.withContext
  * within each call (`use { }`). [close] is idempotent.
  */
 class PdfDocumentHandle private constructor(
-    private val document: PdfDocumentKt,
+    private val _document: PdfDocumentKt,
 ) {
+    /** Exposes the underlying Pdfium document for text extraction. */
+    val document: PdfDocumentKt get() = _document
 
     private val closed = AtomicBoolean(false)
 

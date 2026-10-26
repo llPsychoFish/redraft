@@ -8,11 +8,16 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.redraft.data.DocumentError
+import com.redraft.pdfcore.PdfPoint
+import com.redraft.pdfcore.PdfViewportTransform
+import com.redraft.pdfcore.selection.hitTest
+import com.redraft.pdfcore.selection.pageTextLayout
 import com.redraft.data.DocumentHandle
 import com.redraft.data.RecentFile
 import com.redraft.data.RecentFilesRepository
 import com.redraft.data.RecentsStore
 import com.redraft.data.SafDocumentOpener
+import com.redraft.pdfcore.ViewportState
 import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.ui.viewer.PageBitmapCache
 import com.redraft.ui.overview.ThumbnailCache
@@ -104,6 +109,78 @@ class PdfViewerViewModel(
     // Cache size (A-3) — null = not yet measured
     private val _cacheSizeBytes = MutableStateFlow<Long?>(null)
     val cacheSizeBytes: StateFlow<Long?> = _cacheSizeBytes
+
+    // Selection / hit-testing state (Phase 2, D-06, D-15):
+    // - _selectionState = null → no line selected
+    // - _selectionState = SelectionOverlayState(selectedLine=X) → line X selected
+    // Text layout cache: maps page index → extracted TextPageLayout (lazy, max 5 pages).
+    private val _selectionState = MutableStateFlow<com.redraft.ui.viewer.SelectionOverlayState?>(null)
+    val selectionState: StateFlow<com.redraft.ui.viewer.SelectionOverlayState?> = _selectionState.asStateFlow()
+
+    private val textLayoutCache = mutableMapOf<Int, com.redraft.pdfcore.selection.TextPageLayout>()
+
+    /**
+     * Handles a screen-space tap on [pageIndex]. If a text line is under the tap,
+     * sets [selectionState] to that line. Otherwise clears the selection.
+     *
+     * Called from [PdfViewerScreen] on every tap that is NOT a pinch. The tap
+     * handler is inside [PdfPageItem]'s pointer input block — the page is
+     * unambiguously identified by [pageIndex].
+     *
+     * Text layout is extracted lazily on first tap per page (plan 02-02 §Tap flow).
+     * Block grouping (D-07) runs once per layout and is never consulted by hitTest.
+     *
+     * @param tapScreen screen-space tap point (y-down pixels).
+     * @param pageIndex the page that was tapped.
+     * @param viewport current zoom and pan state.
+     * @param transform screen↔PDF coordinate transform (D-02, D-14).
+     */
+    fun onTap(
+        tapScreen: PdfPoint,
+        pageIndex: Int,
+        viewport: ViewportState,
+        transform: PdfViewportTransform,
+    ) {
+        viewModelScope.launch {
+            val handle = currentHandle ?: return@launch
+
+            // Lazy extract (plan 02-02 §Tap flow): extract once per page, cache up to 5 pages.
+            var layout = textLayoutCache[pageIndex]
+            if (layout == null) {
+                val extracted = withContext(ioDispatcher) {
+                    val geometry = handle.pageSize(pageIndex) as? com.redraft.pdfcore.PdfPageGeometry
+                        ?: return@withContext null
+                    val pageLayout = com.redraft.pdfcore.selection.pageTextLayout(handle.document, pageIndex, geometry)
+                    (pageLayout as? com.redraft.pdfcore.selection.PageTextLayout.Ready)?.layout
+                }
+                if (extracted != null) {
+                    textLayoutCache[pageIndex] = extracted
+                    layout = extracted
+                }
+            }
+            if (layout == null) {
+                // Page has no extractable text.
+                _selectionState.value = null
+                return@launch
+            }
+
+            withContext(Dispatchers.Default) {
+                val result = com.redraft.pdfcore.selection.hitTest(tapScreen, layout, viewport, transform)
+                _selectionState.value = result?.let {
+                    com.redraft.ui.viewer.SelectionOverlayState(
+                        selectedLine = it.line,
+                        blockId = it.line.blockId,
+                        editable = it.line.fragment.editable,
+                    )
+                }
+            }
+        }
+    }
+
+    /** Clears the current text selection (e.g. on single tap outside a line). */
+    fun clearSelection() {
+        _selectionState.value = null
+    }
 
     private val openMutex = Mutex()
     private var currentHandle: DocumentHandle? = null
@@ -227,6 +304,9 @@ class PdfViewerViewModel(
         // Recycle both caches when document is closed
         pageBitmapCache.recycleAll()
         thumbnailCache.recycleAll()
+        // Clear selection state and text layout cache
+        _selectionState.value = null
+        textLayoutCache.clear()
         cleanupScope.launch(NonCancellable) { handle.close() }
     }
 

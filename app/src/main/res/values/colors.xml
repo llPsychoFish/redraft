@@ -4,4 +4,6 @@
     <color name="white">#FFFFFFFF</color>
     <color name="redraft_window_background_light">#FFF2F2F4</color>
     <color name="redraft_window_background_dark">#FF0B0C10</color>
+    <!-- Selection caret: a readable blue — visible on both light and dark backgrounds. -->
+    <color name="selection_caret">#FF1976D2</color>
 </resources>

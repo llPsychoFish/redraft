@@ -48,14 +48,19 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
 import com.redraft.pdfcore.PdfPageGeometry
+import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfViewportTransform
+import com.redraft.pdfcore.ViewportState
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
+import com.redraft.ui.viewer.SelectionOverlay
+import com.redraft.ui.viewer.SelectionOverlayState
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -75,6 +80,7 @@ fun PdfViewerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val handle by viewModel.handle.collectAsStateWithLifecycle()
+    val selectionState by viewModel.selectionState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     // The cache is OWNED by the ViewModel, not by this composition: leaving the viewer to open
     // the page overview must not throw away every rendered page, and recycling happens in
@@ -177,6 +183,11 @@ fun PdfViewerScreen(
                         viewportWidthPx = viewportWidthPx,
                         handle = handle,
                         cache = cache,
+                        visiblePageIndex = uiState.visiblePageIndex,
+                        selectionState = selectionState,
+                        onTap = { tapScreen, pageIdx, viewport, transform ->
+                            viewModel.onTap(tapScreen, pageIdx, viewport, transform)
+                        },
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 }
@@ -392,6 +403,9 @@ private fun PdfPageItem(
     viewportWidthPx: Int,
     handle: DocumentHandle?,
     cache: PageBitmapCache,
+    visiblePageIndex: Int,
+    selectionState: com.redraft.ui.viewer.SelectionOverlayState?,
+    onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Where the LIVE zoom would render.
@@ -551,6 +565,34 @@ private fun PdfPageItem(
                     }
                     .semantics { contentDescription = "Page ${pageIndex + 1} of $pageCount" },
             )
+
+            // Text-selection tap handler (Phase 2, D-06): runs on every tap
+            // that is NOT a pinch. The double-tap-to-zoom is handled by the
+            // zoomInput modifier on the outer LazyColumn (separate pointer). Here
+            // we intercept single-pointer taps only.
+            val currentTransform = transform
+            if (currentTransform != null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(pageIndex) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = true)
+                                val tap = PdfPoint(down.position.x, down.position.y)
+                                onTap(tap, pageIndex, ViewportState(zoom, panX, 0f), currentTransform)
+                            }
+                        },
+                ) {
+                    // Draw the selection caret if this page is selected
+                    SelectionOverlay(
+                        pageIndex = pageIndex,
+                        visiblePageIndex = visiblePageIndex,
+                        state = selectionState,
+                        viewport = com.redraft.pdfcore.ViewportState(zoom, panX, 0f),
+                        transform = currentTransform,
+                    )
+                }
+            }
         }
     }
 }

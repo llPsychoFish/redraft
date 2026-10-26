@@ -12,10 +12,10 @@ import kotlin.math.roundToInt
  * value entering a [PdfRect] is normalised with per-axis min/max first.
  */
 data class PdfRect(
-    val minX: Float,
-    val minY: Float,
-    val maxX: Float,
-    val maxY: Float,
+    var minX: Float,
+    var minY: Float,
+    var maxX: Float,
+    var maxY: Float,
 ) {
     val width: Float get() = maxX - minX
     val height: Float get() = maxY - minY
@@ -43,6 +43,10 @@ data class PdfRect(
     fun intersects(other: PdfRect): Boolean =
         minX <= other.maxX && maxX >= other.minX &&
             minY <= other.maxY && maxY >= other.minY
+
+    /** Inclusive point-in-rectangle test. */
+    fun contains(x: Float, y: Float): Boolean =
+        x >= minX && x <= maxX && y >= minY && y <= maxY
 }
 
 /**

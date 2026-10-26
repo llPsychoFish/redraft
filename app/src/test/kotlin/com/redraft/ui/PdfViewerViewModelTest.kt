@@ -13,6 +13,7 @@ import com.redraft.data.upsert
 import com.redraft.pdfcore.PdfDocumentSource
 import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfcore.PdfRect
+import io.legere.pdfiumandroid.suspend.PdfDocumentKt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -74,6 +75,9 @@ class PdfViewerViewModelTest {
         private val name: String,
         private val log: MutableList<String>,
     ) : DocumentHandle {
+        override val document: PdfDocumentKt
+            get() = throw UnsupportedOperationException("document not used in view model tests")
+
         override suspend fun open(source: PdfDocumentSource) {
             log += "open:$name"
         }
