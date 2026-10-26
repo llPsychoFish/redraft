@@ -2,6 +2,7 @@ package com.redraft.pdfcore
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import com.redraft.pdfcore.selection.PageTextLayout
 import io.legere.pdfiumandroid.suspend.PdfDocumentKt
 import io.legere.pdfiumandroid.suspend.PdfiumCoreKt
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,6 +53,18 @@ class PdfDocumentHandle private constructor(
                 rawRotation = it.getPageRotation(),
             )
         }
+    }
+
+    /**
+     * Extract one page's text as plain data (D-23). Handle discipline lives here
+     * (open-state and bounds checks); the extraction itself is the selection
+     * package's `pageTextLayout`, which closes its own page and text page.
+     */
+    suspend fun pageTextLayout(index: Int, geometry: PdfPageGeometry): PageTextLayout {
+        assertNotMainThread()
+        checkOpen()
+        require(index in 0 until pageCount()) { "Page index $index out of bounds" }
+        return com.redraft.pdfcore.selection.pageTextLayout(document, index, geometry)
     }
 
     suspend fun renderPage(

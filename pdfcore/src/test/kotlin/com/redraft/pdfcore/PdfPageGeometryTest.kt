@@ -1,5 +1,6 @@
 package com.redraft.pdfcore
 
+import com.redraft.pdfcore.selection.normalizeCharRect
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -111,6 +112,21 @@ class PdfPageGeometryTest {
     }
 
     @Test
+    fun disjointBoxes_intersect_isEmpty_notSwappedIntoSpuriousOverlap() {
+        val inside = PdfRect(0f, 0f, 612f, 792f)
+        val outside = PdfRect(700f, 0f, 800f, 792f)
+
+        val overlap = inside.intersect(outside)
+
+        assertTrue("disjoint intersection must be empty", overlap.isEmpty)
+        assertTrue("box beyond the crop must not intersect", !outside.intersects(inside))
+        assertTrue("box inside the crop intersects", inside.intersects(inside))
+        // A zero-width box strictly inside must still intersect (gap maths needs it).
+        val zeroWidth = PdfRect(100f, 100f, 100f, 120f)
+        assertTrue("zero-width box inside must intersect", zeroWidth.intersects(inside))
+    }
+
+    @Test
     fun slotBaseSize_uprightPage_fillsViewportWidth() {
         val geometry = PdfPageGeometry.build(
             pageIndex = 0,
@@ -123,6 +139,27 @@ class PdfPageGeometryTest {
 
         assertEquals(1080, base.widthPx)
         assertEquals((1080f * 792f / 612f).roundToInt(), base.heightPx)
+    }
+
+    @Test
+    fun normalizeCharRect_topGreaterThanBottom_yieldsPositiveHeight() {
+        // PDFium char boxes are y-up: top arrives greater than bottom (§1.3).
+        val rect = normalizeCharRect(left = 0f, top = 300f, right = 50f, bottom = 100f)
+
+        assertTrue("height must be positive", rect.height > 0f)
+        assertEquals(200f, rect.height, 1e-3f)
+        assertEquals(50f, rect.width, 1e-3f)
+    }
+
+    @Test
+    fun charBoxOutsideCrop_failsTheExtractorsIntersectsFilter() {
+        // Exactly the predicate TextExtraction uses: outside boxes are skipped.
+        val crop = PdfRect(0f, 0f, 612f, 792f)
+        val outsideCrop = normalizeCharRect(-100f, 900f, -50f, 850f)
+        val insideCrop = normalizeCharRect(10f, 50f, 40f, 80f)
+
+        assertTrue("box outside the crop must be dropped", !outsideCrop.intersects(crop))
+        assertTrue("box inside the crop must be kept", insideCrop.intersects(crop))
     }
 
     @Test

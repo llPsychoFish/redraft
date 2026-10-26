@@ -20,18 +20,29 @@ data class PdfRect(
     val width: Float get() = maxX - minX
     val height: Float get() = maxY - minY
 
+    /** True when the rect encloses no area (the result of a disjoint [intersect]). */
+    val isEmpty: Boolean get() = width <= 0f || height <= 0f
+
     /**
-     * Overlap of this box with [other], re-normalised so width and height can never
-     * go negative even when the inputs are disjoint (mirrors PDFium's
-     * `bbox_ = CropBox ∩ MediaBox`, 02-RESEARCH §2.3 rule 1).
+     * Overlap of this box with [other] (mirrors PDFium's `bbox_ = CropBox ∩
+     * MediaBox`, 02-RESEARCH §2.3 rule 1). A disjoint pair yields an EMPTY rect
+     * (negative width/height) — never a swapped-in spurious box.
      */
-    fun intersect(other: PdfRect): PdfRect {
-        val loX = max(minX, other.minX)
-        val hiX = min(maxX, other.maxX)
-        val loY = max(minY, other.minY)
-        val hiY = min(maxY, other.maxY)
-        return PdfRect(min(loX, hiX), min(loY, hiY), max(loX, hiX), max(loY, hiY))
-    }
+    fun intersect(other: PdfRect): PdfRect = PdfRect(
+        minX = max(minX, other.minX),
+        minY = max(minY, other.minY),
+        maxX = min(maxX, other.maxX),
+        maxY = min(maxY, other.maxY),
+    )
+
+    /**
+     * Inclusive overlap test: a zero-width box strictly inside [other] still
+     * intersects it (zero-width spaces must survive extraction for gap maths),
+     * while a box beyond [other]'s edges does not.
+     */
+    fun intersects(other: PdfRect): Boolean =
+        minX <= other.maxX && maxX >= other.minX &&
+            minY <= other.maxY && maxY >= other.minY
 }
 
 /**
@@ -112,7 +123,7 @@ data class PdfPageGeometry(
             val media = mediaValues?.takeIfPresent()
             val crop = cropValues?.takeIfPresent()
             val box = when {
-                crop != null && media != null -> crop.intersect(media)
+                crop != null && media != null -> crop.intersect(media).takeUnless { it.isEmpty } ?: crop
                 crop != null -> crop
                 media != null -> media
                 else -> LETTER
