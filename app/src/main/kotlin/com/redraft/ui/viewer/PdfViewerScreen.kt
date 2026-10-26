@@ -25,10 +25,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -119,6 +121,10 @@ fun PdfViewerScreen(
     ) {
         val density = LocalDensity.current
         val viewportWidthPx = with(density) { maxWidth.toPx() }.roundToInt()
+        // The width the gesture handlers clamp against, held in a State and read at
+        // USE time. The pointer blocks are keyed so Compose never restarts them, so
+        // they must not capture this value (01.1-REVIEW W-01).
+        val currentViewportWidthPx = rememberUpdatedState(viewportWidthPx)
 
         if (uiState.pageCount == 0) {
             Box(
@@ -139,7 +145,7 @@ fun PdfViewerScreen(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .zoomInput(viewModel, listState, viewportWidthPx)
+                    .zoomInput(viewModel, listState, currentViewportWidthPx)
                     .singlePointerDoubleTap(onSingleTap = onSingleTap) {
                         val current = viewModel.uiState.value.zoom
                         val target = if (current > 1.2f) 1f else 2f
@@ -193,7 +199,13 @@ fun PdfViewerScreen(
 private fun Modifier.zoomInput(
     viewModel: PdfViewerViewModel,
     listState: LazyListState,
-    viewportWidthPx: Int,
+    // A State, not an Int: the pointer block below is keyed on `Unit`, so Compose
+    // reuses its node and never restarts the block. A captured Int would keep its
+    // first-composition value, and every clamp after a rotation, a multi-window
+    // resize or a fold would then be computed against the old viewport
+    // (01.1-REVIEW W-01). Reading `.value` at each use keeps an in-flight pan or
+    // pinch alive across the resize instead of tearing the gesture down.
+    viewportWidthPx: State<Int>,
 ): Modifier = this
     .pointerInput(Unit) {
         // Custom multi-touch handler (gap G-01-5): detectTransformGestures never reached
@@ -268,7 +280,7 @@ private fun Modifier.zoomInput(
                             // drift is dropped: the list scroll owns that axis (D-06).
                             val pan = viewModel.uiState.value.panX + delta.panX
                             viewModel.onPanChanged(
-                                clampPanX(pan, viewportWidthPx.toFloat(), after),
+                                clampPanX(pan, viewportWidthPx.value.toFloat(), after),
                             )
                         }
                         previousPair = currentPair
@@ -308,7 +320,7 @@ private fun Modifier.zoomInput(
                                 x = change.position.x,
                                 y = change.position.y,
                                 touchSlop = viewConfiguration.touchSlop,
-                                viewportWidthPx = viewportWidthPx.toFloat(),
+                                viewportWidthPx = viewportWidthPx.value.toFloat(),
                                 zoom = zoom,
                             )
                             panState = frame.state
