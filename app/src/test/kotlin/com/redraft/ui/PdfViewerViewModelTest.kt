@@ -11,7 +11,8 @@ import com.redraft.data.RecentFile
 import com.redraft.data.RecentsStore
 import com.redraft.data.upsert
 import com.redraft.pdfcore.PdfDocumentSource
-import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfPageGeometry
+import com.redraft.pdfcore.PdfRect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -77,7 +78,8 @@ class PdfViewerViewModelTest {
             log += "open:$name"
         }
 
-        override suspend fun pageSize(index: Int): PdfPageSize = PdfPageSize(612f, 792f, 0)
+        override suspend fun pageSize(index: Int): PdfPageGeometry =
+            PdfPageGeometry(pageIndex = index, cropBox = PdfRect(0f, 0f, 612f, 792f), rotationIndex = 0)
 
         override suspend fun renderPage(
             index: Int,

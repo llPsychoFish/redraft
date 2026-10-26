@@ -3,13 +3,13 @@ package com.redraft.data
 import android.graphics.Bitmap
 import com.redraft.pdfcore.PdfAssetLoader
 import com.redraft.pdfcore.PdfDocumentSource
-import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfcore.PdfDocumentHandle as PdfCoreDocumentHandle
 
 interface DocumentHandle {
     val pageCount: Int
     suspend fun open(source: PdfDocumentSource)
-    suspend fun pageSize(index: Int): PdfPageSize
+    suspend fun pageSize(index: Int): PdfPageGeometry
     suspend fun renderPage(index: Int, targetWidthPx: Int, targetHeightPx: Int): Bitmap
     suspend fun close()
 }
@@ -27,7 +27,7 @@ class PdfiumDocumentHandle : DocumentHandle {
         pageCount = opened.pageCount()
     }
 
-    override suspend fun pageSize(index: Int): PdfPageSize =
+    override suspend fun pageSize(index: Int): PdfPageGeometry =
         requireDelegate().pageSize(index)
 
     override suspend fun renderPage(

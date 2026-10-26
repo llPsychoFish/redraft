@@ -13,7 +13,7 @@ import com.redraft.data.RecentFile
 import com.redraft.data.RecentFilesRepository
 import com.redraft.data.RecentsStore
 import com.redraft.data.SafDocumentOpener
-import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.ui.viewer.PageBitmapCache
 import com.redraft.ui.overview.ThumbnailCache
 import kotlinx.coroutines.CoroutineDispatcher
@@ -57,7 +57,7 @@ data class ViewerUiState(
     val visiblePageIndex: Int = 0,
     val scrollOffsetPx: Int = 0,
     val panX: Float = 0f,
-    val pageSizes: List<PdfPageSize> = emptyList(),
+    val pageSizes: List<PdfPageGeometry> = emptyList(),
     // True while a pinch gesture owns the scroll position. The scroll-restore
     // effect must not fight the focal anchoring while it is set (D-06, D-07).
     val gestureActive: Boolean = false,

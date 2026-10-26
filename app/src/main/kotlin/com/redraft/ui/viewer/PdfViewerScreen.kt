@@ -51,7 +51,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
-import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
@@ -405,7 +405,7 @@ private fun PdfPageItem(
         val cached = cache.acquire(PageKey(pageIndex, liveBucket))
         mutableStateOf(cached?.let { RenderedPage(it, liveBucket) })
     }
-    var pageSize by remember(pageIndex) { mutableStateOf<PdfPageSize?>(null) }
+    var pageSize by remember(pageIndex) { mutableStateOf<PdfPageGeometry?>(null) }
     var renderTick by remember { mutableIntStateOf(0) }
 
     // The bucket the bitmap on screen was actually rendered at. This is NOT the
@@ -440,18 +440,22 @@ private fun PdfPageItem(
         }
     }
 
+    // The transform is the ONLY place rotation and the CropBox offset live
+    // (D-02, D-14): the slot base size comes from the shared geometry rule and
+    // the crop origin rides the transform — no rotation arithmetic here
+    // (02-RESEARCH §2.3 rule 4).
     val size = pageSize
     val transform = remember(size, viewportWidthPx) {
         size?.let {
-            val baseHeightPx = (viewportWidthPx * it.heightPt / it.widthPt)
-                .roundToInt()
-                .coerceAtLeast(1)
+            val base = it.slotBaseSizePx(viewportWidthPx)
             PdfViewportTransform(
                 pageWidthPt = it.widthPt,
                 pageHeightPt = it.heightPt,
                 rotationDegrees = it.rotationDegrees,
-                renderedWidthPx = viewportWidthPx,
-                renderedHeightPx = baseHeightPx,
+                renderedWidthPx = base.widthPx,
+                renderedHeightPx = base.heightPx,
+                cropOriginX = it.cropBox.minX,
+                cropOriginY = it.cropBox.minY,
             )
         }
     }

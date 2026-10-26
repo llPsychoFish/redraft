@@ -24,6 +24,14 @@ data class RenderedSize(val widthPx: Int, val heightPx: Int)
  * [rotationDegrees] is the page's intrinsic `/Rotate` applied clockwise for
  * display. The rotated (display) space also has a top-left origin and y-down,
  * so [pdfToScreen] composes rotation with the zoom/pan scale.
+ *
+ * [cropOriginX]/[cropOriginY] is the CropBox origin in absolute PDF user space:
+ * char boxes and tap points arrive in absolute coordinates while display space
+ * starts at the CropBox corner, so the origin is subtracted exactly once inside
+ * [pdfToRotated] and added back exactly once inside [rotatedToPdf]
+ * (02-RESEARCH §2.3). This class is therefore the ONLY place that knows about
+ * rotation *and* CropBox offset — no renderer, hit test or overlay may add a
+ * second step (D-02, D-14).
  */
 class PdfViewportTransform(
     val pageWidthPt: Float,
@@ -31,6 +39,8 @@ class PdfViewportTransform(
     rotationDegrees: Int,
     val renderedWidthPx: Int,
     val renderedHeightPx: Int,
+    val cropOriginX: Float = 0f,
+    val cropOriginY: Float = 0f,
 ) {
 
     val rotationDegrees: Int = normalizeRotation(rotationDegrees)
@@ -52,9 +62,16 @@ class PdfViewportTransform(
     private val rotatedPageHeightPt: Float
         get() = if (isQuarterTurn) pageWidthPt else pageHeightPt
 
-    private fun scaleX(zoom: Float): Float = zoom * displayBaseWidthPx / rotatedPageWidthPt
+    internal fun scaleX(zoom: Float): Float = zoom * displayBaseWidthPx / rotatedPageWidthPt
 
-    private fun scaleY(zoom: Float): Float = zoom * displayBaseHeightPx / rotatedPageHeightPt
+    internal fun scaleY(zoom: Float): Float = zoom * displayBaseHeightPx / rotatedPageHeightPt
+
+    /**
+     * Points per screen pixel at [zoom] (the inverse of [scaleX]): how hit-area
+     * padding expressed in dp converts to PDF units, so it shrinks in PDF space
+     * as the user zooms in (D-08).
+     */
+    fun pdfUnitsPerPixel(zoom: Float): Float = rotatedPageWidthPt / (displayBaseWidthPx * zoom)
 
     /** Zoom that makes the displayed page exactly fill [viewportWidthPx]. */
     fun fitWidthZoom(viewportWidthPx: Int): Float =
@@ -81,20 +98,29 @@ class PdfViewportTransform(
         return rotatedToPdf(rotated)
     }
 
-    private fun pdfToRotated(pdf: PdfPoint): PdfPoint = when (rotationDegrees) {
-        0 -> PdfPoint(pdf.x, pageHeightPt - pdf.y)
-        90 -> PdfPoint(pdf.y, pdf.x)
-        180 -> PdfPoint(pageWidthPt - pdf.x, pdf.y)
-        270 -> PdfPoint(pageHeightPt - pdf.y, pageWidthPt - pdf.x)
-        else -> error("Unsupported rotation $rotationDegrees")
+    private fun pdfToRotated(pdf: PdfPoint): PdfPoint {
+        // Crop origin subtracted exactly once, BEFORE the rotation mapping.
+        val x = pdf.x - cropOriginX
+        val y = pdf.y - cropOriginY
+        return when (rotationDegrees) {
+            0 -> PdfPoint(x, pageHeightPt - y)
+            90 -> PdfPoint(y, x)
+            180 -> PdfPoint(pageWidthPt - x, y)
+            270 -> PdfPoint(pageHeightPt - y, pageWidthPt - x)
+            else -> error("Unsupported rotation $rotationDegrees")
+        }
     }
 
-    private fun rotatedToPdf(rotated: PdfPoint): PdfPoint = when (rotationDegrees) {
-        0 -> PdfPoint(rotated.x, pageHeightPt - rotated.y)
-        90 -> PdfPoint(rotated.y, rotated.x)
-        180 -> PdfPoint(pageWidthPt - rotated.x, rotated.y)
-        270 -> PdfPoint(pageWidthPt - rotated.y, pageHeightPt - rotated.x)
-        else -> error("Unsupported rotation $rotationDegrees")
+    private fun rotatedToPdf(rotated: PdfPoint): PdfPoint {
+        val pdf = when (rotationDegrees) {
+            0 -> PdfPoint(rotated.x, pageHeightPt - rotated.y)
+            90 -> PdfPoint(rotated.y, rotated.x)
+            180 -> PdfPoint(pageWidthPt - rotated.x, rotated.y)
+            270 -> PdfPoint(pageWidthPt - rotated.y, pageHeightPt - rotated.x)
+            else -> error("Unsupported rotation $rotationDegrees")
+        }
+        // Crop origin added back exactly once, AFTER the inverse mapping.
+        return PdfPoint(pdf.x + cropOriginX, pdf.y + cropOriginY)
     }
 
     companion object {

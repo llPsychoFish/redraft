@@ -7,12 +7,6 @@ import io.legere.pdfiumandroid.suspend.PdfiumCoreKt
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.withContext
 
-data class PdfPageSize(
-    val widthPt: Float,
-    val heightPt: Float,
-    val rotationDegrees: Int,
-)
-
 /**
  * Single-owner handle over an open PDFium document (decision D-12).
  *
@@ -37,17 +31,25 @@ class PdfDocumentHandle private constructor(
         return document.getPageCount()
     }
 
-    suspend fun pageSize(index: Int): PdfPageSize {
+    suspend fun pageSize(index: Int): PdfPageGeometry {
         assertNotMainThread()
         checkOpen()
         require(index in 0 until pageCount()) { "Page index $index out of bounds" }
         val page = document.openPage(index)
             ?: error("PDFium could not open page $index")
         return page.use {
-            PdfPageSize(
-                widthPt = it.getPageWidthPoint().toFloat(),
-                heightPt = it.getPageHeightPoint().toFloat(),
-                rotationDegrees = it.getPageRotation() * 90,
+            // Page boxes arrive as four positional numbers whose field names are
+            // assigned positionally, not semantically (02-RESEARCH §1.3).
+            // PdfPageGeometry.build normalises them, honours the (-1,-1,-1,-1)
+            // sentinel, intersects crop with media, and coerces the rotation
+            // index so -1 can never become 270° (02-RESEARCH §2.3).
+            val crop = it.getPageCropBox()
+            val media = it.getPageMediaBox()
+            PdfPageGeometry.build(
+                pageIndex = index,
+                cropValues = floatArrayOf(crop.left, crop.top, crop.right, crop.bottom),
+                mediaValues = floatArrayOf(media.left, media.top, media.right, media.bottom),
+                rawRotation = it.getPageRotation(),
             )
         }
     }
