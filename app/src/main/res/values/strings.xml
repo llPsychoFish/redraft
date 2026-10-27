@@ -109,4 +109,6 @@
     <!-- Selection / hit-testing (Phase 2) -->
     <string name="selection_no_text">No text found on this page.</string>
     <string name="selection_nothing_selected">Tap text to select it.</string>
+    <string name="cd_selected_line">Selected line: %s</string>
+    <string name="edit_mode">Edit mode</string>
 </resources>
