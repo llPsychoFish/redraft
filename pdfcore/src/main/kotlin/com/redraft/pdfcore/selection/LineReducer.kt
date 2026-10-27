@@ -1,6 +1,5 @@
 package com.redraft.pdfcore.selection
 
-import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfRect
 import kotlin.math.abs
 import kotlin.math.max
@@ -19,7 +18,7 @@ import kotlin.math.min
  */
 data class TextStyle(
     val fontName: String? = null,   // not bound in current binding
-    val fillColor: Int? = null,      // not bound in current binding
+    val fillColor: Int? = null,     // not bound in current binding
     val fontSizePt: Float,
     /** Baseline start point in PDF user space (y-up coordinates). */
     val baselineY: Float,
@@ -39,20 +38,23 @@ data class TextStyle(
  * baseline direction** of [style], so rotated text uses the same logic with no
  * special case (D-12, D-14).
  *
- * [editable] is `false` when the text direction is vertical or right-to-left
- * (D-11).  Because the binding does not expose direction (see [TextStyle]),
- * this field is always `true` in Phase 2; a future binding exposing the text
- * matrix will allow the real determination.
+ * [editable] defaults from the fragment's direction (D-11): vertical
+ * (`|u.y| > |u.x|`) and right-to-left (`u.x < 0`) lines are selectable but
+ * never editable — Phase 3 must refuse to edit them.
  */
 data class TextFragment(
     val chars: List<CharBox>,
     val style: TextStyle,
-    val editable: Boolean = true, // always true without direction from binding
+    val editable: Boolean = defaultEditable(style),
 ) {
     init {
         require(chars.isNotEmpty()) { "A fragment must contain at least one char" }
     }
 }
+
+/** D-11: pieces the binding cannot report as LTR horizontal default to non-editable. */
+internal fun defaultEditable(style: TextStyle): Boolean =
+    !(abs(style.directionY) > abs(style.directionX) || style.directionX < 0f)
 
 /**
  * One visual line: the union of glyph boxes across word gaps, with a stable
@@ -75,10 +77,14 @@ data class TextLine(
 /**
  * Break [chars] into maximal [TextFragment] sequences: each fragment is
  * characters sharing the same style, where "same" means no style change
- * exceeds the thresholds below (D-13, D-14).
+ * exceeds the thresholds below (D-13, D-14):
+ *
+ * - size difference greater than 0.1 pt,
+ * - baseline difference greater than `max(0.75, 0.15 × size)` pt,
+ * - a derived direction change greater than about 15 degrees.
  *
  * Superscripts / subscripts are never merged into the base line because their
- * size difference (> 0.1 pt) always triggers a fragment boundary.
+ * baseline difference (> 0.15 em) always triggers a fragment boundary.
  */
 fun fragmentChars(chars: List<CharBox>): List<TextFragment> {
     if (chars.isEmpty()) return emptyList()
@@ -89,15 +95,18 @@ fun fragmentChars(chars: List<CharBox>): List<TextFragment> {
     fun emitFragment() {
         if (current.isNotEmpty()) {
             val style = deriveStyle(current)
-            // Determine editable from geometric heuristics when direction is not available:
-            // - Vertical text: glyphs are typically narrow/tall (width < height × 0.3)
-            // - RTL is assumed horizontal; without direction matrix we cannot detect it
-            // D-11: editable=false for vertical |u.y| > |u.x| and RTL (u.x < 0)
-            // The binding does not expose direction, so all fragments default to editable=true.
-            // This is a known limitation documented in TextStyle.
-            val isVertical = detectVerticalFromGeometry(current)
-            fragments.add(TextFragment(current.toList(), style, editable = !isVertical))
-            current.clear()
+            // The binding does not expose the text direction, so [style]'s
+            // direction is the LTR default; fall back to a geometric heuristic
+            // for vertical pieces (D-11, D-14).
+            val verticalHeuristic = detectVerticalFromGeometry(current)
+            fragments.add(
+                TextFragment(
+                    current.toList(),
+                    style,
+                    editable = defaultEditable(style) && !verticalHeuristic,
+                ),
+            )
+            current = mutableListOf()
         }
     }
 
@@ -150,20 +159,45 @@ private fun styleDiffers(a: TextStyle, b: TextStyle): Boolean {
 /**
  * Infer vertical text from bounding-box geometry when direction is not exposed.
  * A vertical fragment typically has height > width × 3.
+ *
+ * Reads the boxes only — it must never mutate input rects (the first char's
+ * rect is reused by later gap maths and by the line's glyph union).
  */
-private fun detectVerticalFromGeometry(chars: List<CharBox>): Boolean {
+internal fun detectVerticalFromGeometry(chars: List<CharBox>): Boolean {
     if (chars.isEmpty()) return false
-    val union = chars.first().rect
+    var minX = Float.MAX_VALUE
+    var minY = Float.MAX_VALUE
+    var maxX = -Float.MAX_VALUE
+    var maxY = -Float.MAX_VALUE
     for (c in chars) {
         val r = c.rect
-        union.minX = min(union.minX, r.minX)
-        union.minY = min(union.minY, r.minY)
-        union.maxX = max(union.maxX, r.maxX)
-        union.maxY = max(union.maxY, r.maxY)
+        minX = min(minX, r.minX)
+        minY = min(minY, r.minY)
+        maxX = max(maxX, r.maxX)
+        maxY = max(maxY, r.maxY)
     }
-    val w = union.width
-    val h = union.height
+    val w = maxX - minX
+    val h = maxY - minY
     return h > 0f && w > 0f && h > w * 3f
+}
+
+// ─── Baseline-direction projection (D-12) ────────────────────────────────────
+
+/**
+ * Projection of an axis-aligned char box onto the fragment's baseline unit
+ * direction `u`: `[uStart, uEnd]` is the char's extent along the direction of
+ * travel, so a gap is simply `next.uStart − prev.uEnd` — rotated text needs no
+ * special case (D-12).
+ */
+internal fun projectOntoU(rect: PdfRect, style: TextStyle): Pair<Float, Float> {
+    val cx = (rect.minX + rect.maxX) * 0.5f
+    val cy = (rect.minY + rect.maxY) * 0.5f
+    val proj = cx * style.directionX + cy * style.directionY
+    // Axis-aligned extent widened by the axis-aligned box: the worst-case
+    // projection span of the box onto u (exact for u along an axis, an upper
+    // bound for skewed directions, which Phase 2 never sees).
+    val span = abs(style.directionX) * rect.width + abs(style.directionY) * rect.height
+    return (proj - span * 0.5f) to (proj + span * 0.5f)
 }
 
 // ─── Gap splitting ────────────────────────────────────────────────────────────
@@ -172,10 +206,12 @@ private fun detectVerticalFromGeometry(chars: List<CharBox>): Boolean {
  * Split each [fragment] into one or more [TextLine] objects using the gap
  * rules from D-12:
  *
- * - Split when `gap > 2 × sizeOfLeftChar`
- * - Also split when `gap ≥ 1 × sizeOfLeftChar` **and**
- *   `gap > 2.5 × medianWordGap` (median computed over gaps in
- *   `(0.05 × size, 1.0 × size)` before any splitting)
+ * - Split when `gap > 2 × sizeOfLeftChar`.
+ * - Also split when the gap exceeds **2.5 × the median word gap** of the
+ *   fragment, computed once over gaps in `(0.05 × size, 1.0 × size)` BEFORE
+ *   splitting — tight table gutters under 2 em (e.g. 0.8 em) split this way,
+ *   while evenly stretched justified gaps stay near the median and survive.
+ * - A gap of at least 1 em with no word-gap sample at all also splits.
  *
  * Characters with `width < 0.01` contribute to the accumulated gap but are
  * excluded from the glyph union, so trailing spaces never widen the hit area
@@ -185,8 +221,9 @@ fun splitFragmentIntoLines(fragment: TextFragment): List<TextLine> {
     val chars = fragment.chars
     if (chars.isEmpty()) return emptyList()
 
-    // Compute medianWordGap once per fragment before any splits (D-12).
-    val medianGap = medianWordGap(chars)
+    val style = fragment.style
+    // Median word gap once per fragment, before any splits (D-12).
+    val medianGapPt = medianWordGap(chars, style)
 
     val lines = mutableListOf<TextLine>()
     var lineChars = mutableListOf<CharBox>()
@@ -196,17 +233,9 @@ fun splitFragmentIntoLines(fragment: TextFragment): List<TextLine> {
 
         if (lineChars.isNotEmpty()) {
             val prev = lineChars.last()
+            val gapPt = gapAlongU(prev, char, style)
             val size = prev.fontSizePt
-            // Measure gap along the baseline direction of the fragment
-            val gap = gapAlongBaseline(prev, char, fragment.style)
-            val gapInEm = gap / size
-
-            // Rule 1: 2 em split
-            val splitsAt2Em = gapInEm > 2f
-            // Rule 2: 1 em AND > 2.5× median split (D-12)
-            val splitsAtMedian = gapInEm >= 1f && gapInEm > 2.5f * (medianGap / size)
-
-            if (splitsAt2Em || splitsAtMedian) {
+            if (splitsAtGap(gapPt, size, medianGapPt)) {
                 lines.add(makeLine(lineChars, fragment))
                 lineChars = mutableListOf()
             }
@@ -219,36 +248,51 @@ fun splitFragmentIntoLines(fragment: TextFragment): List<TextLine> {
         lines.add(makeLine(lineChars, fragment))
     }
 
-    return lines.ifEmpty { listOf(makeLine(chars, fragment)) }
+    return lines
+}
+
+/**
+ * D-12 gap decision, All thresholds are expressed in em of the LEFT char's
+ * font size, exactly as decided.
+ */
+internal fun splitsAtGap(gapPt: Float, sizePt: Float, medianGapPt: Float): Boolean {
+    if (sizePt <= 0f) return false
+    val gapEm = gapPt / sizePt
+    val medianEm = medianGapPt / sizePt
+
+    // Rule 1: any gap wider than 2 em of the left run's font size splits.
+    if (gapEm > 2f) return true
+
+    // Rule 2: a gap more than 2.5× the fragment's median word gap splits —
+    // this is what separates tight table gutters (sub-1-em) from cells while
+    // evenly stretched justified gaps (which sit near the median) stay whole.
+    if (medianEm > 0f && gapEm > 2.5f * medianEm) return true
+
+    // Rule 3 (D-12's "at least 1 em" clause, degenerate case): a gap of at
+    // least 1 em in a fragment that produced no word-gap sample splits.
+    if (medianEm <= 0f && gapEm >= 1f) return true
+
+    return false
 }
 
 /**
  * Gap between two adjacent chars, measured along the fragment's baseline
  * direction (D-12).  For horizontal text (u = (1, 0)) this is the x-difference;
- * for 90° vertical text (u = (0, 1)) this is the y-difference.
+ * for 90° text (u = (0, 1)) this is the y-difference.
  */
-private fun gapAlongBaseline(prev: CharBox, next: CharBox, style: TextStyle): Float {
-    // The baseline direction determines the gap axis.
-    // horizontal (|dx| > |dy|): gap = next.minX - prev.maxX  (dx > 0 for LTR)
-    // vertical   (|dy| > |dx|): gap = next.minY - prev.maxY  (dy > 0 for vertical top-down)
-    return when {
-        abs(style.directionX) >= abs(style.directionY) -> {
-            // Predominantly horizontal: gap along x
-            next.rect.minX - prev.rect.maxX
-        }
-        else -> {
-            // Predominantly vertical: gap along y
-            next.rect.minY - prev.rect.maxY
-        }
-    }
+internal fun gapAlongU(prev: CharBox, next: CharBox, style: TextStyle): Float {
+    val (_, prevEnd) = projectOntoU(prev.rect, style)
+    val (nextStart, _) = projectOntoU(next.rect, style)
+    return nextStart - prevEnd
 }
 
 /**
  * Median of gaps that are between 0.05 × size and 1.0 × size of the reference
- * character (D-12).  Computing this before splitting ensures the median
- * represents the natural word-gap distribution of the whole fragment.
+ * character, measured along the baseline direction (D-12).  Computing this
+ * before splitting ensures the median represents the natural word-gap
+ * distribution of the whole fragment.
  */
-internal fun medianWordGap(chars: List<CharBox>): Float {
+internal fun medianWordGap(chars: List<CharBox>, style: TextStyle): Float {
     if (chars.size < 2) return 0f
     val refSize = chars.first().fontSizePt
     val lo = 0.05f * refSize
@@ -256,7 +300,7 @@ internal fun medianWordGap(chars: List<CharBox>): Float {
     val eligibleGaps = mutableListOf<Float>()
 
     for (i in 0 until chars.size - 1) {
-        val gap = chars[i + 1].rect.minX - chars[i].rect.maxX
+        val gap = gapAlongU(chars[i], chars[i + 1], style)
         if (gap >= lo && gap <= hi) eligibleGaps.add(gap)
     }
 
@@ -264,11 +308,28 @@ internal fun medianWordGap(chars: List<CharBox>): Float {
     else eligibleGaps.sorted()[eligibleGaps.size / 2]
 }
 
+/** Kept for compatibility with earlier call sites/tests. */
+internal fun medianWordGap(chars: List<CharBox>): Float =
+    medianWordGap(chars, TextStyle(fontSizePt = chars.firstOrNull()?.fontSizePt ?: 1f, baselineY = 0f))
+
+// ─── Subset-prefix stripper (D-13) ───────────────────────────────────────────
+
+/**
+ * Strip the six-letter subset prefix from a font name:
+ * `ABCDEF+TimesNewRoman` → `TimesNewRoman` (D-13).  Font names are not bound
+ * in the current binding (D-14); this is ready for when a future binding
+ * exposes `FPDFText_GetFontInfo`.
+ */
+fun stripSubsetPrefix(fontName: String): String {
+    val plus = fontName.indexOf('+')
+    return if (plus == 6 && plus < fontName.length - 1) fontName.substring(plus + 1) else fontName
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /** Union of glyph boxes, zero-width chars excluded from the union but counted in gap. */
 internal fun glyphUnion(chars: List<CharBox>): PdfRect {
-    val result = PdfRect(Float.MAX_VALUE, Float.MAX_VALUE, Float.MIN_VALUE, Float.MIN_VALUE)
+    val result = PdfRect(Float.MAX_VALUE, Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE)
     var hasReal = false
     for (c in chars) {
         if (c.rect.width < 0.01f) continue  // zero-width: contribute gap, not union
