@@ -1,0 +1,43 @@
+{
+  "lines": [
+    {
+      "text": "Fragment",
+      "originPt": [
+        100,
+        700
+      ],
+      "widthPt": 96.0,
+      "heightPt": 24,
+      "charRange": [
+        0,
+        8
+      ]
+    },
+    {
+      "text": "of",
+      "originPt": [
+        100,
+        680
+      ],
+      "widthPt": 24.0,
+      "heightPt": 24,
+      "charRange": [
+        8,
+        10
+      ]
+    },
+    {
+      "text": "three",
+      "originPt": [
+        100,
+        660
+      ],
+      "widthPt": 60.0,
+      "heightPt": 24,
+      "charRange": [
+        11,
+        16
+      ]
+    }
+  ]
+}

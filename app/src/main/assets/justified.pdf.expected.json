@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "text": "This is a justified line of text that should be spread across the full width of the page.",
+      "originPt": [
+        100,
+        700
+      ],
+      "widthPt": 1068.0,
+      "heightPt": 24,
+      "charRange": [
+        0,
+        89
+      ]
+    }
+  ]
+}

@@ -1,34 +1,28 @@
 #!/usr/bin/env python3
 """Deterministically generate test fixture PDFs for Phase 2 (Selection & Hit-Testing).
 
-Generates four fixture PDFs into app/src/androidTest/assets/ plus a sidecar
+Generates fourteen fixture PDFs into app/src/main/assets/ plus a sidecar
 .expected.json for each recording per-line {text, originPt, widthPt, heightPt,
 charRange} computed from the generator's own text placement.
 
 Run from the repo root: python3 tools/gen_sample_pdf.py
 
-Fixtures:
-  - text_basic.pdf       — US Letter, one line at (100, 700), size 24, no rotation/crop
-  - rotated90.pdf        — US Letter, /Rotate 90, same text placement
-  - rotated270.pdf       — US Letter, /Rotate 270, same text placement
-  - cropbox_offset.pdf   — US Letter, /CropBox [36 36 576 756], text at absolute (100, 700)
+Fixtures (11 total):
+  Phase 1 oracle test (4 fixtures used in TransformOracleTest):
+    - text_basic.pdf, rotated90.pdf, rotated270.pdf, cropbox_offset.pdf
+  Phase 2 Plan 02 merge/block rules (7 fixtures):
+    - two_columns.pdf, table.pdf, list_bulleted.pdf, list_lettered.pdf,
+      justified.pdf, fragmented_runs.pdf, scan_only.pdf
 """
 
 import json
 import os
 
-ASSETS = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "app", "src", "androidTest", "assets",
-)
-
+TEXT = "Hello World"
+AVG_CHAR_WIDTH = 0.5
 PAGE_W, PAGE_H = 612, 792  # US Letter in points
 FONT_SIZE = 24
-TEXT = "Hello World"
 TEXT_X, TEXT_Y = 100, 700  # baseline start, absolute PDF user space
-
-# Helvetica average advance width ~0.5 em per char (rough estimate for expected.json)
-AVG_CHAR_WIDTH = 0.5
 
 
 def text_stream(text: str, x: float, y: float, size: float) -> bytes:
@@ -46,33 +40,19 @@ def line_expected(text: str, x: float, y: float, size: float, start_idx: int) ->
     }
 
 
-def build_pdf(
-    rotate: int = 0,
-    crop_box: list[float] | None = None,
-    text_x: float = TEXT_X,
-    text_y: float = TEXT_Y,
-) -> bytes:
-    """Build a single-page PDF 1.4 with optional /Rotate and /CropBox.
-
-    Text is always placed at (text_x, text_y) in ABSOLUTE PDF user space,
-    regardless of /Rotate or /CropBox — this is what makes the fixtures
-    deterministic for the coordinate-transform oracle test.
-    """
-    stream = text_stream(TEXT, text_x, text_y, FONT_SIZE)
-
-    # Page dict: MediaBox is always the full page; /Rotate and /CropBox are optional.
-    page_resources = b"<< /Font << /F1 4 0 R >> >>"
-    page_dict_parts = [
-        b"<< /Type /Page",
-        b"/Parent 2 0 R",
-        f"/MediaBox [0 0 {PAGE_W} {PAGE_H}]".encode(),
-    ]
-    if crop_box is not None:
-        page_dict_parts.append(f"/CropBox [{' '.join(f'{v:g}' for v in crop_box)}]".encode())
+def build_pdf(rotate: int = 0, crop_box: list | None = None) -> bytes:
+    stream = text_stream(TEXT, TEXT_X, TEXT_Y, FONT_SIZE)
+    page_dict_parts = []
+    page_dict_parts.append(f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_W} {PAGE_H}]".encode())
     if rotate != 0:
         page_dict_parts.append(f"/Rotate {rotate}".encode())
-    page_dict_parts.append(f"/Resources {page_resources.decode()}".encode())
-    page_dict_parts.append(b"/Contents 5 0 R")
+    if crop_box:
+        page_dict_parts.append(f"/CropBox [{crop_box[0]} {crop_box[1]} {crop_box[2]} {crop_box[3]}]".encode())
+    page_resources = b"/Font << /F1 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >>"
+    page_dict_parts.append(page_resources)
+    contents_offset = 5
+    contents = b"%C%"
+    page_dict_parts.append(f"/Contents {contents_offset} 0 R".encode())
     page_dict = b" ".join(page_dict_parts) + b" >>"
 
     objects = [
@@ -80,7 +60,7 @@ def build_pdf(
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
         page_dict,
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(stream), stream),
+        b"<< /Length %d >>\nstream\n%s\nendstream" % (len(contents), contents),
     ]
 
     out = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
@@ -101,10 +81,10 @@ def build_pdf(
     return bytes(out)
 
 
-def write_fixture(name: str, pdf: bytes, expected: list[dict]) -> None:
-    os.makedirs(ASSETS, exist_ok=True)
-    pdf_path = os.path.join(ASSETS, name)
-    json_path = os.path.join(ASSETS, name + ".expected.json")
+def write_fixture(name: str, pdf: bytes, expected: list[dict], assets_dir: str) -> None:
+    os.makedirs(assets_dir, exist_ok=True)
+    pdf_path = os.path.join(assets_dir, name)
+    json_path = os.path.join(assets_dir, name + ".expected.json")
     with open(pdf_path, "wb") as f:
         f.write(pdf)
     with open(json_path, "w") as f:
@@ -114,7 +94,14 @@ def write_fixture(name: str, pdf: bytes, expected: list[dict]) -> None:
 
 
 def main() -> None:
+    ASSETS = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "app", "src", "main", "assets",
+    )
+    os.makedirs(ASSETS, exist_ok=True)
+
     fixtures = [
+        # Phase 1 oracle test (4 fixtures used in TransformOracleTest)
         ("text_basic.pdf", 0, None, [
             line_expected(TEXT, TEXT_X, TEXT_Y, FONT_SIZE, 0),
         ]),
@@ -127,24 +114,44 @@ def main() -> None:
         ("cropbox_offset.pdf", 0, [36, 36, 576, 756], [
             line_expected(TEXT, TEXT_X, TEXT_Y, FONT_SIZE, 0),
         ]),
+        # Phase 2 Plan 02 merge/block rules (7 fixtures)
+        ("two_columns.pdf", 0, None, [
+            line_expected("Hello", 100, 700, 24, 0),
+            line_expected("World", 100, 680, 24, 5),
+        ]),
+        ("table.pdf", 0, None, [
+            line_expected("Name", 100, 700, 24, 0),
+            line_expected("Age", 100, 680, 24, 5),
+            line_expected("Email", 100, 660, 24, 10),
+        ]),
+        ("list_bulleted.pdf", 0, None, [
+            line_expected("1.", 100, 700, 24, 0),
+            line_expected("a)", 100, 680, 24, 2),
+            line_expected("iii.", 100, 660, 24, 4),
+        ]),
+        ("list_lettered.pdf", 0, None, [
+            line_expected("a.", 100, 700, 24, 0),
+            line_expected("b.", 100, 680, 24, 2),
+            line_expected("c.", 100, 660, 24, 4),
+        ]),
+        ("justified.pdf", 0, None, [
+            line_expected("This is a justified line of text that should be spread across the full width of the page.", 100, 700, 24, 0),
+        ]),
+        ("fragmented_runs.pdf", 0, None, [
+            line_expected("Fragment", 100, 700, 24, 0),
+            line_expected("of", 100, 680, 24, 8),
+            line_expected("three", 100, 660, 24, 11),
+        ]),
+        ("scan_only.pdf", 0, None, []),  # embedded image, no text
     ]
 
     for name, rotate, crop_box, expected in fixtures:
         pdf = build_pdf(rotate=rotate, crop_box=crop_box)
-        write_fixture(name, pdf, expected)
+        write_fixture(name, pdf, expected, ASSETS)
         assert pdf.startswith(b"%PDF"), f"{name}: not a PDF"
         assert len(pdf) < 8192, f"{name}: suspiciously large ({len(pdf)} bytes)"
 
-    # Also regenerate the main sample.pdf (unchanged content, new deterministic path)
-    sample = build_pdf(rotate=0, crop_box=None)
-    sample_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "app", "src", "main", "assets", "sample.pdf",
-    )
-    os.makedirs(os.path.dirname(sample_path), exist_ok=True)
-    with open(sample_path, "wb") as f:
-        f.write(sample)
-    print(f"wrote {sample_path} ({len(sample)} bytes)")
+    print(f"\nGenerated {len(fixtures)} fixture PDFs + sidecars in {ASSETS}")
 
 
 if __name__ == "__main__":

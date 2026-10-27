@@ -1,0 +1,43 @@
+{
+  "lines": [
+    {
+      "text": "1.",
+      "originPt": [
+        100,
+        700
+      ],
+      "widthPt": 24.0,
+      "heightPt": 24,
+      "charRange": [
+        0,
+        2
+      ]
+    },
+    {
+      "text": "a)",
+      "originPt": [
+        100,
+        680
+      ],
+      "widthPt": 24.0,
+      "heightPt": 24,
+      "charRange": [
+        2,
+        4
+      ]
+    },
+    {
+      "text": "iii.",
+      "originPt": [
+        100,
+        660
+      ],
+      "widthPt": 48.0,
+      "heightPt": 24,
+      "charRange": [
+        4,
+        8
+      ]
+    }
+  ]
+}
