@@ -110,7 +110,7 @@ fun hitTest(
     val lastChar = line.chars.lastOrNull()
 
     // Caret endpoints: baseline left and right of the line's rect
-    val baselineY = line.rect.minY  // minY == baseline for normalised boxes
+    val baselineY = lineBaselineOffset(line)
     val caretStart = PdfPoint(line.rect.minX, baselineY)
     val caretEnd = PdfPoint(
         lastChar?.rect?.maxX ?: line.rect.maxX,

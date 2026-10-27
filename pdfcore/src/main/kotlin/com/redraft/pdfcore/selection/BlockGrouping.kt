@@ -91,11 +91,11 @@ private fun compareForFolding(a: TextLine, b: TextLine): Int {
     val aVertical = isVerticalFragment(a)
     val bVertical = isVerticalFragment(b)
     return when {
-        aVertical || bVertical -> compareByFloat(a.rect.minX, b.rect.minX)
+        aVertical || bVertical -> compareByFloat(lineBaselineOffset(a), lineBaselineOffset(b))
             .takeIf { it != 0 }
-            ?: compareByFloat(-a.rect.minY, -b.rect.minY)
+            ?: compareByFloat(a.rect.minX, b.rect.minX)
 
-        else -> compareByFloat(-a.rect.minY, -b.rect.minY)
+        else -> compareByFloat(-lineBaselineOffset(a), -lineBaselineOffset(b))
             .takeIf { it != 0 }
             ?: compareByFloat(a.rect.minX, b.rect.minX)
     }
@@ -135,11 +135,12 @@ private fun startsNewBlock(
 
     // Leading gap: at or above 1.5 × line height the block ends (D-15).
     // For horizontal LTR text (folded top-down, y-up) the whitespace above the
-    // candidate line is `last.minY − line.maxY`; for vertical fragments the
+    // candidate line is `last baseline − line top`; for vertical fragments the
     // whitespace precedes along the fragment direction (below is +y).
     val vertical = isVerticalFragment(line)
-    val lineHeight = if (vertical) line.rect.width else line.rect.height
-    val leadingGap = if (vertical) line.rect.minX - last.rect.maxX else last.rect.minY - line.rect.maxY
+    val lineHeight = lineAscent(line)
+    val leadingGap = if (vertical) line.rect.minX - last.rect.maxX
+    else lineBaselineOffset(last) - line.rect.maxY
     if (lineHeight > 0f && leadingGap >= 1.5f * lineHeight) return true
 
     // Column / table-cell gap: the left edge must either hold (≤ 0.5 em),
@@ -171,11 +172,11 @@ private fun startsNewBlock(
 /** Block height cap: total height exceeds 12 × the median member line height. */
 private fun isBlockHeightCapped(block: List<TextLine>): Boolean {
     if (block.size < 2) return false
-    val heights = block.map { it.rect.height }.sorted()
+    val heights = block.map { lineAscent(it) }.sorted()
     val median = heights[heights.size / 2]
     if (median <= 0f) return false
-    val top = block.maxOf { it.rect.maxY }
-    val bottom = block.minOf { it.rect.minY }
+    val top = block.maxOf { lineBaselineOffset(it) }
+    val bottom = block.minOf { lineBaselineOffset(it) }
     return (top - bottom) >= MAX_BLOCK_HEIGHT_LINE_HEIGHTS * median
 }
 

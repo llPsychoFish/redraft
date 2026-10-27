@@ -236,4 +236,59 @@ class LineMergeTest {
             abs(medianWordGap(chars, fragment(chars).style) - 1f) < 1e-3f,
         )
     }
+
+    // ─── The median samples WORD gaps only (real PDFium geometry) ────────────
+
+    /** "Left column" laid out like PDFium reports it at 12 pt Helvetica. */
+    private fun leftColumnChars(): List<CharBox> {
+        val size = 12f
+        val chars = mutableListOf<CharBox>()
+        var x = 72f
+        var index = 0
+        for (ch in "Left") {
+            chars += charBox(index++, ch.toString(), x, 6f, size = size)
+            x += 7.2f // 6 pt advance + 1.2 pt letter gap (0.1 em)
+        }
+        // The literal space: a REAL 3.336 pt advance (278/1000 em), so the
+        // ink-to-ink word gap is 4.536 pt (0.378 em).
+        chars += CharBox(
+            index = index++,
+            text = " ",
+            rect = PdfRect(x, 700f, x + 3.336f, 700f),
+            fontSizePt = size,
+        )
+        x += 3.336f
+        for (ch in "column") {
+            chars += charBox(index++, ch.toString(), x, 6f, size = size)
+            x += 7.2f
+        }
+        return chars
+    }
+
+    @Test
+    fun median_word_gap_ignores_letter_gaps_and_samples_whitespace_boundaries() {
+        // Real PDFium output for "Left column row one" at 12 pt: letter gaps of
+        // 0.06–0.15 em dominate the gap list, the word gaps are ~0.34 em.
+        // The median must be the WORD gap, otherwise D-12's "2.5× the median"
+        // rule splits the line at every space.
+        val chars = leftColumnChars()
+        val median = medianWordGap(chars, fragment(chars).style)
+
+        // The word gap is the ink-to-ink distance across the space (4.536 pt);
+        // the letter gaps are 1.2 pt.
+        assertTrue(
+            "median must be the 0.378 em word gap, was $median",
+            abs(median - 4.536f) < 1e-3f,
+        )
+    }
+
+    @Test
+    fun a_line_with_letter_gaps_only_does_not_split_at_every_space() {
+        // "Left column": the single word gap IS the median, so rule 2 cannot
+        // fire and the line stays whole.
+        val chars = leftColumnChars()
+        val lines = splitFragmentIntoLines(fragment(chars))
+        assertEquals(1, lines.size)
+        assertEquals("Left column", lines[0].chars.joinToString("") { it.text }.trim())
+    }
 }

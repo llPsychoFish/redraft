@@ -4,6 +4,7 @@ import com.redraft.pdfcore.PdfRect
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -80,11 +81,18 @@ data class TextLine(
  * exceeds the thresholds below (D-13, D-14):
  *
  * - size difference greater than 0.1 pt,
- * - baseline difference greater than `max(0.75, 0.15 × size)` pt,
  * - a derived direction change greater than about 15 degrees.
  *
- * Superscripts / subscripts are never merged into the base line because their
- * baseline difference (> 0.15 em) always triggers a fragment boundary.
+ * The baseline is deliberately NOT part of this test.  PDFium reports the font's
+ * ascender/descender box for most glyphs but the glyph's own ink box for
+ * descenders (`g`, `p`, `y`), so a descender's box bottom sits about 0.2 em
+ * below the real baseline; comparing box bottoms between neighbours would cut
+ * `Right column row one` into `Ri` / `g` / `ht column row one`.  Baselines are
+ * therefore clustered per fragment in [splitFragmentIntoLines], which tolerates
+ * descender boxes and still splits superscripts (D-13 refinement).
+ *
+ * Whitespace-only and zero-width characters never break a fragment: they carry
+ * no glyph, they only contribute to the gap between two glyphs (D-12).
  */
 fun fragmentChars(chars: List<CharBox>): List<TextFragment> {
     if (chars.isEmpty()) return emptyList()
@@ -111,7 +119,7 @@ fun fragmentChars(chars: List<CharBox>): List<TextFragment> {
     }
 
     for (char in chars) {
-        if (current.isNotEmpty()) {
+        if (current.isNotEmpty() && !isGapOnlyChar(char)) {
             val prev = current.last()
             val prevStyle = deriveStyle(listOf(prev))
             val nextStyle = deriveStyle(listOf(char))
@@ -127,8 +135,10 @@ fun fragmentChars(chars: List<CharBox>): List<TextFragment> {
 
 /** Derive the [TextStyle] for a single-char or multi-char fragment. */
 internal fun deriveStyle(sampleChars: List<CharBox>): TextStyle {
-    val first = sampleChars.first()
-    // Use the first char's font size as the fragment's reference size (D-14).
+    // Whitespace carries no style of its own — PDFium reports a size of 1 pt
+    // for synthesized spaces — so the reference char is the first glyph.
+    val first = sampleChars.firstOrNull { !isGapOnlyChar(it) } ?: sampleChars.first()
+    // Use the first glyph's font size as the fragment's reference size (D-14).
     // The binding does not expose fontName / fillColor / direction (D-14).
     return TextStyle(
         fontName = null,
@@ -144,10 +154,6 @@ internal fun deriveStyle(sampleChars: List<CharBox>): TextStyle {
 private fun styleDiffers(a: TextStyle, b: TextStyle): Boolean {
     // Size difference: 0.1 pt threshold
     if (abs(a.fontSizePt - b.fontSizePt) > 0.1f) return true
-
-    // Baseline difference: max(0.75, 0.15 * size) pt
-    val baselineThreshold = maxOf(0.75f, 0.15f * a.fontSizePt)
-    if (abs(a.baselineY - b.baselineY) > baselineThreshold) return true
 
     // Direction change > ~15°: use dot-product threshold on normalised direction
     val dot = a.directionX * b.directionX + a.directionY * b.directionY
@@ -200,48 +206,167 @@ internal fun projectOntoU(rect: PdfRect, style: TextStyle): Pair<Float, Float> {
     return (proj - span * 0.5f) to (proj + span * 0.5f)
 }
 
-// ─── Gap splitting ────────────────────────────────────────────────────────────
+// ─── Gap splitting (D-12) ─────────────────────────────────────────────────────
 
 /**
- * Split each [fragment] into one or more [TextLine] objects using the gap
- * rules from D-12:
+ * How far below the baseline a glyph box may hang before it is treated as a
+ * different line rather than as a descender.
  *
- * - Split when `gap > 2 × sizeOfLeftChar`.
- * - Also split when the gap exceeds **2.5 × the median word gap** of the
- *   fragment, computed once over gaps in `(0.05 × size, 1.0 × size)` BEFORE
- *   splitting — tight table gutters under 2 em (e.g. 0.8 em) split this way,
- *   while evenly stretched justified gaps stay near the median and survive.
- * - A gap of at least 1 em with no word-gap sample at all also splits.
+ * PDFium reports the font's ascender/descender box for most glyphs but the
+ * glyph's own ink box for descenders, so a `g` hangs about 0.22 em below the
+ * baseline of its line.  0.3 em covers the deepest descenders in the common
+ * Latin faces while staying far below any real leading.
+ */
+internal const val DESCENDER_ALLOWANCE_EM = 0.3f
+
+/**
+ * True for characters that carry no glyph of their own: whitespace and
+ * zero-width boxes.  They contribute to the accumulated gap between two glyphs
+ * but are excluded from the glyph union (D-12, D-13).
+ */
+internal fun isGapOnlyChar(char: CharBox): Boolean =
+    char.rect.width < 0.01f || char.text.isBlank()
+
+/**
+ * The character's offset perpendicular to the baseline, used as the baseline
+ * proxy: the box bottom for horizontal text, the box left edge for vertical
+ * text (whose baseline runs along +y).
+ */
+internal fun baselineProxy(char: CharBox, style: TextStyle): Float =
+    if (abs(style.directionY) > abs(style.directionX)) char.rect.minX else char.rect.minY
+
+/**
+ * Group [chars] into baseline clusters and return the cluster id per char.
+ *
+ * The most frequent box offset in the fragment is the baseline (D-13).  A char
+ * whose offset sits up to [DESCENDER_ALLOWANCE_EM] below that baseline is a
+ * descender of the same line; a char whose offset is more than the D-13
+ * threshold (`max(0.75, 0.15 × size)`) above it starts a new line — that is a
+ * superscript.  A char whose box hangs lower than every other box in its
+ * cluster while being shorter than that box reveals the true baseline, so the
+ * cluster is re-based instead of split (the `g`-first case).
+ */
+internal fun assignBaselineClusters(chars: List<CharBox>, style: TextStyle): IntArray {
+    val clusters = IntArray(chars.size)
+    if (chars.isEmpty()) return clusters
+
+    val size = chars.first().fontSizePt
+    val threshold = maxOf(0.75f, 0.15f * size)
+    val allowance = DESCENDER_ALLOWANCE_EM * size
+    val heightEpsilon = maxOf(0.05f, 0.005f * size)
+
+    val offsets = chars.map { baselineProxy(it, style) }
+    // Distinct offsets (rounded to 0.01 pt) with their member indexes.
+    val byOffset = LinkedHashMap<Float, MutableList<Int>>()
+    offsets.forEachIndexed { index, offset ->
+        val key = (offset * 100f).roundToInt() / 100f
+        byOffset.getOrPut(key) { mutableListOf() }.add(index)
+    }
+    // Most frequent offset first; ties keep first-occurrence order.
+    val ranked = byOffset.entries.sortedByDescending { it.value.size }
+
+    val clusterOffsets = mutableListOf<Float>()
+    val clusterMembers = mutableListOf<MutableList<Int>>()
+
+    for (entry in ranked) {
+        val offset = entry.key
+        var target = clusterOffsets.indexOfFirst { baseline ->
+            offset >= baseline - allowance && offset <= baseline + threshold
+        }
+        if (target < 0) {
+            // No cluster accepts this offset: either a raised baseline
+            // (superscript) or a cluster whose baseline was taken from a
+            // descender box.  A cluster whose every member hangs lower and
+            // taller than this char has the wrong baseline — re-base it.
+            target = clusterOffsets.indices.firstOrNull { candidate ->
+                val members = clusterMembers[candidate]
+                val thisHeight = chars[entry.value.first()].rect.height
+                members.isNotEmpty() && members.all {
+                    chars[it].rect.height > thisHeight + heightEpsilon &&
+                        baselineProxy(chars[it], style) < offset
+                }
+            } ?: -1
+            if (target >= 0) {
+                clusterOffsets[target] = offset
+                clusterMembers[target].addAll(entry.value)
+                entry.value.forEach { clusters[it] = target }
+                continue
+            }
+            clusterOffsets.add(offset)
+            clusterMembers.add(mutableListOf())
+            target = clusterOffsets.size - 1
+        }
+        clusterMembers[target].addAll(entry.value)
+        entry.value.forEach { clusters[it] = target }
+    }
+
+    return clusters
+}
+
+/**
+ * Split each [fragment] into one or more [TextLine] objects.
+ *
+ * Two rules decide the boundaries:
+ *
+ * - **Baseline** (D-13): chars are grouped into baseline clusters first, so
+ *   descenders stay on their line while superscripts and the next row start a
+ *   new one.
+ * - **Gap** (D-12): within a baseline, a gap wider than `2 × sizeOfLeftChar`,
+ *   or one wider than `2.5 × the median word gap` of the fragment, splits the
+ *   line — tight table gutters under 2 em (e.g. 0.8 em) split this way, while
+ *   evenly stretched justified gaps stay near the median and survive.
  *
  * Characters with `width < 0.01` contribute to the accumulated gap but are
  * excluded from the glyph union, so trailing spaces never widen the hit area
- * (D-12, D-13).
+ * (D-12, D-13).  A fragment that holds no glyph at all yields no line.
  */
 fun splitFragmentIntoLines(fragment: TextFragment): List<TextLine> {
     val chars = fragment.chars
     if (chars.isEmpty()) return emptyList()
 
     val style = fragment.style
+    val ink = chars.filterNot { isGapOnlyChar(it) }
+    if (ink.isEmpty()) return emptyList()
+
     // Median word gap once per fragment, before any splits (D-12).
     val medianGapPt = medianWordGap(chars, style)
 
+    val inkClusters = assignBaselineClusters(ink, style)
+    val clusterOfChar = HashMap<Int, Int>(ink.size)
+    ink.forEachIndexed { index, char -> clusterOfChar[char.index] = inkClusters[index] }
+
     val lines = mutableListOf<TextLine>()
     var lineChars = mutableListOf<CharBox>()
+    var lastGlyph: CharBox? = null
+    var currentCluster = -1
 
-    for (i in chars.indices) {
-        val char = chars[i]
+    for (char in chars) {
+        if (isGapOnlyChar(char)) {
+            // Whitespace rides along with the line it follows; it contributes
+            // to the gap but never to the union.
+            if (lineChars.isNotEmpty()) lineChars.add(char)
+            continue
+        }
 
-        if (lineChars.isNotEmpty()) {
-            val prev = lineChars.last()
-            val gapPt = gapAlongU(prev, char, style)
-            val size = prev.fontSizePt
-            if (splitsAtGap(gapPt, size, medianGapPt)) {
+        val cluster = clusterOfChar[char.index] ?: currentCluster
+        if (lineChars.isNotEmpty() && cluster != currentCluster) {
+            lines.add(makeLine(lineChars, fragment))
+            lineChars = mutableListOf()
+            lastGlyph = null
+        }
+        currentCluster = cluster
+
+        val previous = lastGlyph
+        if (lineChars.isNotEmpty() && previous != null) {
+            val gapPt = gapAlongU(previous, char, style)
+            if (splitsAtGap(gapPt, previous.fontSizePt, medianGapPt)) {
                 lines.add(makeLine(lineChars, fragment))
                 lineChars = mutableListOf()
             }
         }
 
         lineChars.add(char)
+        lastGlyph = char
     }
 
     if (lineChars.isNotEmpty()) {
@@ -287,30 +412,67 @@ internal fun gapAlongU(prev: CharBox, next: CharBox, style: TextStyle): Float {
 }
 
 /**
- * Median of gaps that are between 0.05 × size and 1.0 × size of the reference
- * character, measured along the baseline direction (D-12).  Computing this
- * before splitting ensures the median represents the natural word-gap
- * distribution of the whole fragment.
+ * Median of the fragment's **word gaps**, measured along the baseline
+ * direction (D-12).
+ *
+ * A gap is a *word gap* when a whitespace character (a literal space or a
+ * PDFium-synthesised separator) sits between the two glyphs it separates.
+ * Only those gaps are sampled: sampling every gap would let the many small
+ * LETTER gaps (0.06–0.15 em in real PDFium output) dominate the median and
+ * turn D-12's "2.5× the median word gap" rule into "split at every space".
+ *
+ * The sample is further restricted to the word-gap window `(0.05 × size,
+ * 1.0 × size]`, so a column gutter or a table cell gap (several em wide)
+ * never becomes the median.  The median is computed before any split, over
+ * the whole fragment.
+ *
+ * When the fragment holds no whitespace at all there is no word-gap
+ * distribution to speak of; the window sample of all gaps is used instead
+ * (the legacy behaviour, and what D-12's degenerate case assumes).
  */
 internal fun medianWordGap(chars: List<CharBox>, style: TextStyle): Float {
     if (chars.size < 2) return 0f
-    val refSize = chars.first().fontSizePt
+    val refSize = style.fontSizePt.takeIf { it > 0f }
+        ?: chars.firstOrNull { !isGapOnlyChar(it) }?.fontSizePt
+        ?: chars.first().fontSizePt
     val lo = 0.05f * refSize
     val hi = 1.0f * refSize
-    val eligibleGaps = mutableListOf<Float>()
+    val wordGaps = mutableListOf<Float>()
+    val allGaps = mutableListOf<Float>()
 
-    for (i in 0 until chars.size - 1) {
-        val gap = gapAlongU(chars[i], chars[i + 1], style)
-        if (gap >= lo && gap <= hi) eligibleGaps.add(gap)
+    var previousGlyph: CharBox? = null
+    var whitespaceBetween = false
+    for (char in chars) {
+        if (isGapOnlyChar(char)) {
+            // A whitespace (or zero-width) character marks the boundary
+            // between two words — it carries no glyph of its own.
+            if (previousGlyph != null) whitespaceBetween = true
+            continue
+        }
+        val previous = previousGlyph
+        if (previous != null) {
+            val gap = gapAlongU(previous, char, style)
+            if (gap >= lo && gap <= hi) {
+                allGaps.add(gap)
+                if (whitespaceBetween) wordGaps.add(gap)
+            }
+        }
+        previousGlyph = char
+        whitespaceBetween = false
     }
 
-    return if (eligibleGaps.isEmpty()) 0f
-    else eligibleGaps.sorted()[eligibleGaps.size / 2]
+    val sample = if (wordGaps.isNotEmpty()) wordGaps else allGaps
+    return if (sample.isEmpty()) 0f
+    else sample.sorted()[sample.size / 2]
 }
 
 /** Kept for compatibility with earlier call sites/tests. */
-internal fun medianWordGap(chars: List<CharBox>): Float =
-    medianWordGap(chars, TextStyle(fontSizePt = chars.firstOrNull()?.fontSizePt ?: 1f, baselineY = 0f))
+internal fun medianWordGap(chars: List<CharBox>): Float {
+    val size = chars.firstOrNull { !isGapOnlyChar(it) }?.fontSizePt
+        ?: chars.firstOrNull()?.fontSizePt
+        ?: 1f
+    return medianWordGap(chars, TextStyle(fontSizePt = size, baselineY = 0f))
+}
 
 // ─── Subset-prefix stripper (D-13) ───────────────────────────────────────────
 
@@ -359,6 +521,30 @@ private fun makeLine(chars: List<CharBox>, fragment: TextFragment): TextLine {
         fragment = fragment,
     )
 }
+
+/**
+ * The line's baseline offset: the highest box offset among its glyphs.
+ *
+ * A descender box hangs below (or left of) the baseline, so the maximum offset
+ * is the baseline itself — the same convention the baseline clustering uses.
+ */
+internal fun lineBaselineOffset(line: TextLine): Float =
+    if (abs(line.fragment.style.directionY) > abs(line.fragment.style.directionX)) {
+        line.chars.maxOf { it.rect.minX }
+    } else {
+        line.chars.maxOf { it.rect.minY }
+    }
+
+/**
+ * The line's own height above its baseline — the ascent, with the descender
+ * depth excluded, so a line containing `g` measures the same as its neighbours.
+ */
+internal fun lineAscent(line: TextLine): Float =
+    if (abs(line.fragment.style.directionY) > abs(line.fragment.style.directionX)) {
+        line.rect.maxX - lineBaselineOffset(line)
+    } else {
+        line.rect.maxY - lineBaselineOffset(line)
+    }
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
 
