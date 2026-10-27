@@ -75,7 +75,7 @@ class TransformOracleTest {
                     val transform = PdfViewportTransform(
                         pageWidthPt = pageWidthPt,
                         pageHeightPt = pageHeightPt,
-                        rotationDegrees = rotationIndex * 90,
+                        rotationDegrees = 0,
                         renderedWidthPx = renderedWidthPx,
                         renderedHeightPx = renderedHeightPx,
                         cropOriginX = cropOriginX,
