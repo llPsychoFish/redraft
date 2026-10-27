@@ -152,10 +152,75 @@ class LineMergeTest {
         assertTrue("runs must concatenate in order, was: $text", text.startsWith("HelloWorld"))
     }
 
+    // ─── D-13: exact style matching ─────────────────────────────────────────
+
+    @Test
+    fun size_difference_of_0_1_pt_merges_while_0_2_pt_splits() {
+        // 24.05 vs 24.14: ~0.1 pt under the 0.1 pt Float threshold → same
+        // fragment, one line.
+        val close = listOf(
+            charBox(0, "A", 100f, 12f, size = 24.05f),
+            charBox(1, "B", 112.1f, 12f, size = 24.14f),
+        )
+        assertEquals(1, reduceCharsToLines(close).size)
+
+        // 24.05 vs 24.25: diff > 0.1 pt → separate fragments, separate lines.
+        val apart = listOf(
+            charBox(0, "A", 100f, 12f, size = 24.05f),
+            charBox(1, "B", 112.1f, 12f, size = 24.25f),
+        )
+        assertEquals(2, reduceCharsToLines(apart).size)
+    }
+
+    // ─── D-13: superscripts and subscripts never merge into the base line ───
+
+    @Test
+    fun superscript_separated_by_more_than_0_15_em_of_baseline_does_not_merge() {
+        // Size 24: baseline tolerance max(0.75, 0.15 x 24) = 3.6 pt; a 4 pt
+        // raised character cannot merge into the base line.
+        val base = charBox(0, "A", 100f, 12f, size = 24f, baseline = 700f)
+        val sup = charBox(1, "2", 112f, 6f, size = 24f, baseline = 704f)
+        val lines = reduceCharsToLines(listOf(base, sup))
+        assertEquals(2, lines.size)
+        assertEquals("A", lines[0].chars.joinToString("") { it.text })
+        assertEquals("2", lines[1].chars.joinToString("") { it.text })
+    }
+
+    // ─── D-14 fallback honest fields: subset-prefix stripper ─────────────────
+
+    @Test
+    fun subset_prefix_stripper_strips_a_six_letter_prefix() {
+        assertEquals("TimesNewRoman", stripSubsetPrefix("ABCDEF+TimesNewRoman"))
+    }
+
+    @Test
+    fun subset_prefix_stripper_leaves_an_unprefixed_name_untouched() {
+        assertEquals("TimesNewRoman", stripSubsetPrefix("TimesNewRoman"))
+    }
+
+    // ─── D-11: vertical and right-to-left pieces are not editable ────────────
+
+    @Test
+    fun vertical_fragment_carries_editable_false() {
+        val chars = listOf(
+            charBox(0, "A", 100f, 10f, size = 10f, baseline = 700f),
+            charBox(1, "B", 100f, 10f, size = 10f, baseline = 712f),
+        )
+        val fragment90 = fragment(chars, directionX = 0f, directionY = 1f)
+        assertEquals(false, fragment90.editable)
+    }
+
+    @Test
+    fun right_to_left_fragment_carries_editable_false() {
+        val chars = listOf(charBox(0, "A", 200f, 10f), charBox(1, "B", 190f, 10f))
+        val fragmentRtl = fragment(chars, directionX = -1f, directionY = 0f)
+        assertEquals(false, fragmentRtl.editable)
+    }
+
+    // ─── Median sampling window (D-12) ───────────────────────────────────────
+
     @Test
     fun median_word_gap_is_computed_over_the_word_gap_window() {
-        // Gaps: two tiny kerning gaps (excluded), one 0.05..1.0 em word gap,
-        // one 3 em gap (excluded from the sample but rule 1 splits it first).
         val chars = listOf(
             charBox(0, "A", 100f, 5f, size = 10f),
             charBox(1, "B", 105.2f, 5f, size = 10f),   // gap 0.2 pt = 0.02 em — excluded
