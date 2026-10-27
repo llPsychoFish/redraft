@@ -122,6 +122,14 @@ fun PdfViewerScreen(
             .collect { (index, offset) -> viewModel.onScroll(index, offset) }
     }
 
+    // Report the pages that are on screen (D-28): the ViewModel cancels the
+    // extraction of a page that left the viewport and evicts its cached
+    // layout.  The selected page keeps its layout so the overlay survives.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index }.toSet() }
+            .collect { visible -> viewModel.onVisiblePagesChanged(visible) }
+    }
+
     BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
     ) {

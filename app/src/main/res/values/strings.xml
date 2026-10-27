@@ -111,4 +111,6 @@
     <string name="selection_nothing_selected">Tap text to select it.</string>
     <string name="cd_selected_line">Selected line: %s</string>
     <string name="edit_mode">Edit mode</string>
+    <string name="no_selectable_text">No selectable text on this page</string>
+    <string name="could_not_read_text">Couldn\'t read this page\'s text</string>
 </resources>

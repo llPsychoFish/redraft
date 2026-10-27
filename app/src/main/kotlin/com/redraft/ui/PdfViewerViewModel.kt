@@ -21,14 +21,19 @@ import com.redraft.pdfcore.ViewportState
 import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.ui.viewer.PageBitmapCache
 import com.redraft.ui.overview.ThumbnailCache
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +43,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -79,6 +85,45 @@ data class ViewerUiState(
 const val MIN_ZOOM = 1f
 const val MAX_ZOOM = 5f
 
+/**
+ * Per-page text extraction state (D-28 … D-31).
+ *
+ * The state is *settled* when it is [Ready], [Empty] or [Failed].  Only a
+ * settled state may produce a message; [Loading] never does (D-30).
+ */
+sealed interface PageTextState {
+    /** The page's text was extracted: [layout] holds the plain-data lines. */
+    data class Ready(val layout: com.redraft.pdfcore.selection.TextPageLayout) : PageTextState
+
+    /** Extraction is in flight — a tap waits for it, up to one second (D-29). */
+    data object Loading : PageTextState
+
+    /** The page has no extractable text at all (D-30). */
+    data object Empty : PageTextState
+
+    /** The page's text could not be read (D-31). */
+    data object Failed : PageTextState
+}
+
+/**
+ * A one-shot, user-facing viewer message.  The ViewModel emits the *kind* of
+ * message; the UI resolves it to a string resource, so the copy stays in
+ * `strings.xml` (D-30, D-31).
+ */
+enum class ViewerMessage {
+    /** "No selectable text on this page" (D-30). */
+    NoSelectableText,
+
+    /** "Couldn't read this page's text" (D-31). */
+    CouldNotReadText,
+}
+
+/** How long a tap waits for an in-flight extraction before it is dropped (D-29). */
+const val EXTRACTION_WAIT_MS = 1_000L
+
+/** Roughly how many extracted page layouts are kept (D-28). */
+const val MAX_CACHED_TEXT_LAYOUTS = 4
+
 fun clampZoom(zoom: Float): Float = zoom.coerceIn(MIN_ZOOM, MAX_ZOOM)
 
 class PdfViewerViewModel(
@@ -87,7 +132,19 @@ class PdfViewerViewModel(
     private val resolveDisplayName: (String) -> String,
     private val clock: () -> Long = System::currentTimeMillis,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Where the (pure, CPU-bound) hit test runs. */
+    private val computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
     private val cleanupScope: CoroutineScope = CoroutineScope(SupervisorJob() + ioDispatcher),
+    /**
+     * Extracts one page's text.  Injectable so the extraction lifecycle
+     * (timeout, cancellation, rate limiting) is unit-testable without the
+     * native PDFium library; the default is the real pdfcore extraction.
+     */
+    private val extractPageText: suspend (DocumentHandle, Int) -> com.redraft.pdfcore.selection.PageTextLayout =
+        { handle, index ->
+            val geometry = handle.pageSize(index)
+            com.redraft.pdfcore.selection.pageTextLayout(handle.document, index, geometry)
+        },
     // Cache ownership (A-1) — single instance per ViewModel
     val pageBitmapCache: PageBitmapCache = PageBitmapCache(),
     val thumbnailCache: ThumbnailCache = ThumbnailCache(),
@@ -113,11 +170,46 @@ class PdfViewerViewModel(
     // Selection / hit-testing state (Phase 2, D-06, D-15):
     // - _selectionState = null → no line selected
     // - _selectionState = SelectionOverlayState(selectedLine=X) → line X selected
-    // Text layout cache: maps page index → extracted TextPageLayout (lazy, max 5 pages).
     private val _selectionState = MutableStateFlow<com.redraft.ui.viewer.SelectionOverlayState?>(null)
     val selectionState: StateFlow<com.redraft.ui.viewer.SelectionOverlayState?> = _selectionState.asStateFlow()
 
-    private val textLayoutCache = mutableMapOf<Int, com.redraft.pdfcore.selection.TextPageLayout>()
+    // Edit mode (D-18): off by default on every open, toggled by the pencil
+    // action in the viewer top bar.  Leaving Edit mode clears the selection
+    // (D-20), and closing the document leaves Edit mode (D-21).
+    private val _editMode = MutableStateFlow(false)
+    val editMode: StateFlow<Boolean> = _editMode.asStateFlow()
+
+    // One-shot messages (D-30, D-31).  The UI resolves them to string
+    // resources and shows them in the snackbar host.
+    private val _messages = MutableSharedFlow<ViewerMessage>(extraBufferCapacity = 8)
+    val messages: SharedFlow<ViewerMessage> = _messages.asSharedFlow()
+
+    // Extraction lifecycle (D-28 … D-31):
+    // - textLayoutCache: LRU of extracted page layouts (~4 entries).
+    // - pageTextStates: the last known state per page.
+    // - extractionJobs: the in-flight extraction per page — a second tap
+    //   awaits the existing job instead of starting a second extraction.
+    private val textLayoutCache = LinkedHashMap<Int, com.redraft.pdfcore.selection.TextPageLayout>(16, 0.75f, true)
+    private val pageTextStates = mutableMapOf<Int, PageTextState>()
+    private val extractionJobs = mutableMapOf<Int, Job>()
+
+    // The page that owns the current selection: its layout survives the
+    // viewport eviction (D-28) and the overlay keeps working (D-24).
+    private var selectionPageIndex: Int? = null
+
+    // Rate limiting (D-31): one message per page per visit.  The marker is
+    // cleared when the visible page changes.
+    private var lastMessagePageIndex: Int? = null
+    private var lastVisiblePageIndex: Int? = null
+
+    /** Number of cached page layouts — exposed for the lifecycle unit tests. */
+    internal val cachedLayoutCount: Int get() = textLayoutCache.size
+
+    /** Number of in-flight extraction jobs — exposed for the lifecycle unit tests. */
+    internal val activeExtractionCount: Int get() = extractionJobs.size
+
+    /** The last known extraction state of [pageIndex] — exposed for tests. */
+    internal fun pageTextStateOf(pageIndex: Int): PageTextState? = pageTextStates[pageIndex]
 
     /**
      * Handles a screen-space tap on [pageIndex]. If a text line is under the tap,
@@ -127,8 +219,11 @@ class PdfViewerViewModel(
      * handler is inside [PdfPageItem]'s pointer input block — the page is
      * unambiguously identified by [pageIndex].
      *
-     * Text layout is extracted lazily on first tap per page (plan 02-02 §Tap flow).
-     * Block grouping (D-07) runs once per layout and is never consulted by hitTest.
+     * In READ mode the tap is ignored: it toggles the viewer chrome instead
+     * (D-19).  In EDIT mode the page's text is extracted lazily on first tap
+     * (D-28); a tap that arrives while the extraction is still running waits
+     * for it for at most [EXTRACTION_WAIT_MS] and is dropped silently when
+     * that timeout expires (D-29).
      *
      * @param tapScreen screen-space tap point (y-down pixels).
      * @param pageIndex the page that was tapped.
@@ -141,45 +236,183 @@ class PdfViewerViewModel(
         viewport: ViewportState,
         transform: PdfViewportTransform,
     ) {
+        // Read mode: a tap toggles the chrome, it never selects (D-19).
+        if (!_editMode.value) return
+
         viewModelScope.launch {
             val handle = currentHandle ?: return@launch
 
-            // Lazy extract (plan 02-02 §Tap flow): extract once per page, cache up to 5 pages.
-            var layout = textLayoutCache[pageIndex]
-            if (layout == null) {
-                val extracted = withContext(ioDispatcher) {
-                    val geometry = handle.pageSize(pageIndex) as? com.redraft.pdfcore.PdfPageGeometry
-                        ?: return@withContext null
-                    val pageLayout = com.redraft.pdfcore.selection.pageTextLayout(handle.document, pageIndex, geometry)
-                    (pageLayout as? com.redraft.pdfcore.selection.PageTextLayout.Ready)?.layout
+            when (val state = awaitPageText(pageIndex, handle)) {
+                is PageTextState.Ready -> {
+                    // A miss on a page that HAS text merely clears the
+                    // selection — no message (D-30).
+                    val result = withContext(computeDispatcher) {
+                        com.redraft.pdfcore.selection.hitTest(tapScreen, state.layout, viewport, transform)
+                    }
+                    _selectionState.value = result?.let {
+                        selectionPageIndex = pageIndex
+                        com.redraft.ui.viewer.SelectionOverlayState(
+                            selectedLine = it.line,
+                            blockId = it.line.blockId,
+                            editable = it.line.fragment.editable,
+                        )
+                    }
+                    if (result == null) selectionPageIndex = null
                 }
-                if (extracted != null) {
-                    textLayoutCache[pageIndex] = extracted
-                    layout = extracted
-                }
-            }
-            if (layout == null) {
-                // Page has no extractable text.
-                _selectionState.value = null
-                return@launch
-            }
 
-            withContext(Dispatchers.Default) {
-                val result = com.redraft.pdfcore.selection.hitTest(tapScreen, layout, viewport, transform)
-                _selectionState.value = result?.let {
-                    com.redraft.ui.viewer.SelectionOverlayState(
-                        selectedLine = it.line,
-                        blockId = it.line.blockId,
-                        editable = it.line.fragment.editable,
-                    )
-                }
+                PageTextState.Empty -> emitMessage(ViewerMessage.NoSelectableText, pageIndex)
+
+                PageTextState.Failed -> emitMessage(ViewerMessage.CouldNotReadText, pageIndex)
+
+                // Still loading after the timeout: the tap is dropped — no
+                // selection change and no message (D-29).
+                PageTextState.Loading -> Unit
             }
         }
+    }
+
+    /**
+     * The page's text, waiting at most [EXTRACTION_WAIT_MS] for an in-flight
+     * extraction (D-28, D-29).
+     *
+     * A second tap on the same page awaits the EXISTING job — it never starts
+     * a second extraction.
+     */
+    private suspend fun awaitPageText(
+        pageIndex: Int,
+        handle: DocumentHandle,
+    ): PageTextState {
+        textLayoutCache[pageIndex]?.let { return PageTextState.Ready(it) }
+
+        val job = extractionJobs[pageIndex] ?: startExtraction(pageIndex, handle)
+
+        val finished = withTimeoutOrNull(EXTRACTION_WAIT_MS) {
+            job.join()
+            true
+        } ?: false
+
+        // Timed out: the tap is dropped silently (D-29).
+        if (!finished) return PageTextState.Loading
+
+        return pageTextStates[pageIndex] ?: PageTextState.Loading
+    }
+
+    /**
+     * Starts the extraction for [pageIndex] and registers the in-flight job,
+     * so a second tap awaits it instead of extracting twice (D-28).
+     */
+    private fun startExtraction(pageIndex: Int, handle: DocumentHandle): Job {
+        pageTextStates[pageIndex] = PageTextState.Loading
+        val job = viewModelScope.launch(ioDispatcher) {
+            val result = try {
+                extractPageText(handle, pageIndex)
+            } catch (cancellation: CancellationException) {
+                throw cancellation
+            } catch (_: Throwable) {
+                com.redraft.pdfcore.selection.PageTextLayout.Failed
+            }
+            when (result) {
+                is com.redraft.pdfcore.selection.PageTextLayout.Ready -> {
+                    textLayoutCache[pageIndex] = result.layout
+                    pageTextStates[pageIndex] = PageTextState.Ready(result.layout)
+                    enforceLayoutCacheLimit()
+                }
+
+                com.redraft.pdfcore.selection.PageTextLayout.Empty ->
+                    pageTextStates[pageIndex] = PageTextState.Empty
+
+                com.redraft.pdfcore.selection.PageTextLayout.Failed ->
+                    pageTextStates[pageIndex] = PageTextState.Failed
+            }
+            extractionJobs.remove(pageIndex)
+        }
+        extractionJobs[pageIndex] = job
+        return job
+    }
+
+    /**
+     * Keeps the layout cache at roughly [MAX_CACHED_TEXT_LAYOUTS] entries,
+     * plus the page that owns the current selection (D-28).
+     */
+    private fun enforceLayoutCacheLimit() {
+        val limit = MAX_CACHED_TEXT_LAYOUTS + if (selectionPageIndex != null) 1 else 0
+        val protectedPage = selectionPageIndex
+        while (textLayoutCache.size > limit) {
+            val oldest = textLayoutCache.keys.firstOrNull { it != protectedPage } ?: break
+            textLayoutCache.remove(oldest)
+        }
+    }
+
+    /**
+     * Emits a message, at most once per page per visit (D-31).
+     *
+     * D-32 (the optional "This page may be a scan" hint) is deliberately
+     * NOT implemented: deciding that a page looks like a scan requires
+     * enumerating the page's objects to find an embedded image, and the
+     * pinned pdfiumandroid 3.0.4-alpha01 binding exposes no page-object API
+     * at all (no `FPDFPage_CountObjects` / `FPDFPage_GetObject` — see
+     * 02-RESEARCH §1.2 and §6.4).  The approximate alternative — rendering a
+     * thumbnail and measuring non-background coverage — is non-deterministic
+     * and false-positives on coloured backgrounds, so the hint stays omitted
+     * and the plain no-text message is shown instead.
+     */
+    private fun emitMessage(message: ViewerMessage, pageIndex: Int) {
+        if (lastMessagePageIndex == pageIndex) return
+        lastMessagePageIndex = pageIndex
+        _messages.tryEmit(message)
+    }
+
+    /**
+     * The pages currently on screen (D-28).
+     *
+     * A page that leaves the viewport has its extraction job cancelled and its
+     * cached layout evicted — except the page that owns the current selection,
+     * whose layout must survive so the overlay keeps working (D-24).
+     *
+     * The visible page changing also clears the message rate-limit marker, so
+     * the next visit to a page may show its message again (D-31).
+     */
+    fun onVisiblePagesChanged(visible: Set<Int>) {
+        val visiblePage = visible.minOrNull() ?: uiState.value.visiblePageIndex
+        if (visiblePage != lastVisiblePageIndex) {
+            lastVisiblePageIndex = visiblePage
+            lastMessagePageIndex = null
+        }
+
+        // Cancel the extraction of every page that left the screen.
+        val gone = extractionJobs.keys - visible
+        for (page in gone) {
+            extractionJobs.remove(page)?.cancel()
+            pageTextStates.remove(page)
+        }
+
+        // Evict the layouts of the pages that left the screen; the selected
+        // page keeps its layout.
+        val keep = selectionPageIndex
+        val evict = textLayoutCache.keys - visible - setOfNotNull(keep)
+        for (page in evict) {
+            textLayoutCache.remove(page)
+            pageTextStates.remove(page)
+        }
+        enforceLayoutCacheLimit()
+    }
+
+    /** Turns Edit mode on or off (D-18).  Leaving it clears the selection (D-20). */
+    fun setEditMode(enabled: Boolean) {
+        if (_editMode.value == enabled) return
+        _editMode.value = enabled
+        if (!enabled) clearSelection()
+    }
+
+    /** Toggles Edit mode (D-18). */
+    fun toggleEditMode() {
+        setEditMode(!_editMode.value)
     }
 
     /** Clears the current text selection (e.g. on single tap outside a line). */
     fun clearSelection() {
         _selectionState.value = null
+        selectionPageIndex = null
     }
 
     private val openMutex = Mutex()
@@ -304,9 +537,18 @@ class PdfViewerViewModel(
         // Recycle both caches when document is closed
         pageBitmapCache.recycleAll()
         thumbnailCache.recycleAll()
-        // Clear selection state and text layout cache
+        // Clear selection state and the whole extraction lifecycle
+        // (D-21, D-28): layouts, in-flight jobs and per-page states are
+        // dropped, Edit mode is left, and the message rate limit is reset.
         _selectionState.value = null
+        selectionPageIndex = null
         textLayoutCache.clear()
+        pageTextStates.clear()
+        extractionJobs.values.forEach { it.cancel() }
+        extractionJobs.clear()
+        lastMessagePageIndex = null
+        lastVisiblePageIndex = null
+        _editMode.value = false
         cleanupScope.launch(NonCancellable) { handle.close() }
     }
 
