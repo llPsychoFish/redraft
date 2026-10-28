@@ -1,0 +1,108 @@
+{
+  "lines": [
+    {
+      "text": "Left column row one",
+      "originPt": [
+        72.0,
+        700.0
+      ],
+      "widthPt": 108.05,
+      "heightPt": 12.0,
+      "charRange": [
+        0,
+        19
+      ]
+    },
+    {
+      "text": "Right column row one",
+      "originPt": [
+        330.0,
+        700.0
+      ],
+      "widthPt": 116.04,
+      "heightPt": 12.0,
+      "charRange": [
+        19,
+        39
+      ]
+    },
+    {
+      "text": "Left column row two",
+      "originPt": [
+        72.0,
+        680.0
+      ],
+      "widthPt": 106.7,
+      "heightPt": 12.0,
+      "charRange": [
+        39,
+        58
+      ]
+    },
+    {
+      "text": "Right column row two",
+      "originPt": [
+        330.0,
+        680.0
+      ],
+      "widthPt": 114.7,
+      "heightPt": 12.0,
+      "charRange": [
+        58,
+        78
+      ]
+    },
+    {
+      "text": "Left column row three",
+      "originPt": [
+        72.0,
+        660.0
+      ],
+      "widthPt": 115.38,
+      "heightPt": 12.0,
+      "charRange": [
+        78,
+        99
+      ]
+    },
+    {
+      "text": "Right column row three",
+      "originPt": [
+        330.0,
+        660.0
+      ],
+      "widthPt": 123.37,
+      "heightPt": 12.0,
+      "charRange": [
+        99,
+        121
+      ]
+    },
+    {
+      "text": "Left column row four",
+      "originPt": [
+        72.0,
+        640.0
+      ],
+      "widthPt": 108.71,
+      "heightPt": 12.0,
+      "charRange": [
+        121,
+        141
+      ]
+    },
+    {
+      "text": "Right column row four",
+      "originPt": [
+        330.0,
+        640.0
+      ],
+      "widthPt": 116.7,
+      "heightPt": 12.0,
+      "charRange": [
+        141,
+        162
+      ]
+    }
+  ]
+}

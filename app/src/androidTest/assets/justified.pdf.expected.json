@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "text": "This justified paragraph spreads its words evenly across the full width line",
+      "originPt": [
+        72.0,
+        700.0
+      ],
+      "widthPt": 390.14,
+      "heightPt": 12.0,
+      "charRange": [
+        0,
+        76
+      ]
+    }
+  ]
+}

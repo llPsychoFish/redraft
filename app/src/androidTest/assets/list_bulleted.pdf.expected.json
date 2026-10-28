@@ -1,0 +1,43 @@
+{
+  "lines": [
+    {
+      "text": "\u2022 First bullet item",
+      "originPt": [
+        72.0,
+        700.0
+      ],
+      "widthPt": 88.88,
+      "heightPt": 12.0,
+      "charRange": [
+        0,
+        19
+      ]
+    },
+    {
+      "text": "\u2022 Second bullet item",
+      "originPt": [
+        72.0,
+        680.0
+      ],
+      "widthPt": 106.25,
+      "heightPt": 12.0,
+      "charRange": [
+        19,
+        39
+      ]
+    },
+    {
+      "text": "\u2022 Third bullet item",
+      "originPt": [
+        72.0,
+        660.0
+      ],
+      "widthPt": 92.89,
+      "heightPt": 12.0,
+      "charRange": [
+        39,
+        58
+      ]
+    }
+  ]
+}
