@@ -83,13 +83,13 @@ data class TextLine(
  * - size difference greater than 0.1 pt,
  * - a derived direction change greater than about 15 degrees.
  *
- * The baseline is deliberately NOT part of this test.  PDFium reports the font's
- * ascender/descender box for most glyphs but the glyph's own ink box for
- * descenders (`g`, `p`, `y`), so a descender's box bottom sits about 0.2 em
- * below the real baseline; comparing box bottoms between neighbours would cut
- * `Right column row one` into `Ri` / `g` / `ht column row one`.  Baselines are
- * therefore clustered per fragment in [splitFragmentIntoLines], which tolerates
- * descender boxes and still splits superscripts (D-13 refinement).
+ * The baseline is deliberately NOT part of this test.  PDFium reports each
+ * glyph's own ink box, so a descender's (`g`, `p`, `y`) box bottom sits about
+ * 0.2 em below the real baseline; comparing box bottoms between neighbours
+ * would cut `Right column row one` into `Ri` / `g` / `ht column row one`.
+ * Baselines are therefore clustered per fragment in [splitFragmentIntoLines],
+ * which tolerates descender boxes and still splits superscripts (D-13
+ * refinement).
  *
  * Whitespace-only and zero-width characters never break a fragment: they carry
  * no glyph, they only contribute to the gap between two glyphs (D-12).
@@ -238,70 +238,130 @@ internal fun baselineProxy(char: CharBox, style: TextStyle): Float =
 /**
  * Group [chars] into baseline clusters and return the cluster id per char.
  *
- * The most frequent box offset in the fragment is the baseline (D-13).  A char
- * whose offset sits up to [DESCENDER_ALLOWANCE_EM] below that baseline is a
- * descender of the same line; a char whose offset is more than the D-13
- * threshold (`max(0.75, 0.15 × size)`) above it starts a new line — that is a
- * superscript.  A char whose box hangs lower than every other box in its
- * cluster while being shorter than that box reveals the true baseline, so the
- * cluster is re-based instead of split (the `g`-first case).
+ * PDFium reports **ink boxes**, not baselines, so the box bottom is only the
+ * baseline for glyphs that sit on it:
+ *
+ * - anchor glyphs (letters, digits — ink at least 0.4 em tall) report the
+ *   baseline as their box bottom; their mode is the line's baseline,
+ * - descenders (`g`, `p`, `y`) and brackets (`(`, `)`) hang about 0.2 em below
+ *   it and form a weaker cluster that belongs to that line,
+ * - short glyphs (quotes, `=`, `-`, `_`, `.`) ride 0.1–0.45 em above the
+ *   baseline of the line they belong to.
+ *
+ * A weaker cluster within the descender allowance of the next baseline is
+ * therefore folded into that line, while a cluster of equal support stays
+ * separate — that is what keeps a superscript off its base line (D-13).
  */
 internal fun assignBaselineClusters(chars: List<CharBox>, style: TextStyle): IntArray {
     val clusters = IntArray(chars.size)
     if (chars.isEmpty()) return clusters
 
     val size = chars.first().fontSizePt
-    val threshold = maxOf(0.75f, 0.15f * size)
-    val allowance = DESCENDER_ALLOWANCE_EM * size
-    val heightEpsilon = maxOf(0.05f, 0.005f * size)
+    val vertical = abs(style.directionY) > abs(style.directionX)
+    val descenderAllowancePt = DESCENDER_ALLOWANCE_EM * size
+    val aboveThresholdPt = maxOf(0.75f, 0.15f * size)
+    val anchorThreshold = 0.4f * size
+    val groupTol = 0.15f * size
+    val raisedAllowancePt = 0.6f * size
 
-    val offsets = chars.map { baselineProxy(it, style) }
-    // Distinct offsets (rounded to 0.01 pt) with their member indexes.
-    val byOffset = LinkedHashMap<Float, MutableList<Int>>()
-    offsets.forEachIndexed { index, offset ->
-        val key = (offset * 100f).roundToInt() / 100f
-        byOffset.getOrPut(key) { mutableListOf() }.add(index)
+    // Offset perpendicular to the baseline direction.  For horizontal text this
+    // is the box bottom (the baseline of a glyph that sits on it); for 90°
+    // text it is the box left edge.
+    fun offset(c: CharBox): Float = baselineProxy(c, style)
+
+    // Ink extent perpendicular to the baseline direction.
+    fun extent(c: CharBox): Float = if (vertical) c.rect.width else c.rect.height
+
+    // Anchor glyphs reach far enough that their offset marks the baseline.
+    // Quotes, '=', '-', '_' and '.' are short and never do.
+    val anchorIdx = chars.indices.filter { extent(chars[it]) >= anchorThreshold }
+
+    // Cluster anchor offsets (single linkage over 0.15 em).
+    val groups = mutableListOf<MutableList<Int>>()
+    var previousOffset = Float.NEGATIVE_INFINITY
+    for (i in anchorIdx.sortedBy { offset(chars[it]) }) {
+        val o = offset(chars[i])
+        if (groups.isEmpty() || o - previousOffset > groupTol) groups.add(mutableListOf())
+        groups.last().add(i)
+        previousOffset = o
     }
-    // Most frequent offset first; ties keep first-occurrence order.
-    val ranked = byOffset.entries.sortedByDescending { it.value.size }
+    if (groups.isEmpty()) return clusters
 
-    val clusterOffsets = mutableListOf<Float>()
-    val clusterMembers = mutableListOf<MutableList<Int>>()
+    // One candidate baseline per group: the offset most of its members share.
+    class Baseline(val value: Float, val support: Int, val members: MutableList<Int>)
 
-    for (entry in ranked) {
-        val offset = entry.key
-        var target = clusterOffsets.indexOfFirst { baseline ->
-            offset >= baseline - allowance && offset <= baseline + threshold
+    val candidates = groups.map { group ->
+        val counts = group.groupingBy { offset(chars[it]) }.eachCount()
+        val top = counts.maxByOrNull { it.value }!!
+        Baseline(top.key, top.value, group.toMutableList())
+    }.sortedBy { it.value }
+
+    // A weaker group sitting below the next baseline by no more than the
+    // descender allowance is that line's descenders, not a line of its own.
+    // A stronger group is a real line; equal support means neither wins, so a
+    // superscript never absorbs its base line (D-13).
+    val lines = mutableListOf<Baseline>()
+    for (candidate in candidates) {
+        if (lines.isEmpty()) {
+            lines.add(candidate)
+            continue
         }
-        if (target < 0) {
-            // No cluster accepts this offset: either a raised baseline
-            // (superscript) or a cluster whose baseline was taken from a
-            // descender box.  A cluster whose every member hangs lower and
-            // taller than this char has the wrong baseline — re-base it.
-            target = clusterOffsets.indices.firstOrNull { candidate ->
-                val members = clusterMembers[candidate]
-                val thisHeight = chars[entry.value.first()].rect.height
-                members.isNotEmpty() && members.all {
-                    chars[it].rect.height > thisHeight + heightEpsilon &&
-                        baselineProxy(chars[it], style) < offset
-                }
-            } ?: -1
-            if (target >= 0) {
-                clusterOffsets[target] = offset
-                clusterMembers[target].addAll(entry.value)
-                entry.value.forEach { clusters[it] = target }
-                continue
+        val last = lines.last()
+        val gap = candidate.value - last.value
+        val sameLine = gap <= 0.05f * size
+        val descenderGroup =
+            gap > 0f && gap <= descenderAllowancePt && last.support < candidate.support
+        if (sameLine || descenderGroup) {
+            val value = if (sameLine && last.support >= candidate.support) last.value else candidate.value
+            val support = maxOf(last.support, candidate.support)
+            lines[lines.lastIndex] =
+                Baseline(value, support, last.members.apply { addAll(candidate.members) })
+        } else {
+            lines.add(candidate)
+        }
+    }
+
+    // Anchors belong to the baseline they formed; the short glyphs are placed
+    // afterwards on the line they belong to.
+    val assignments = IntArray(chars.size) { -1 }
+    for ((j, line) in lines.withIndex()) {
+        for (member in line.members) assignments[member] = j
+    }
+    for (i in chars.indices) {
+        if (assignments[i] >= 0) continue
+        val o = offset(chars[i])
+        val short = extent(chars[i]) < anchorThreshold
+        var best = -1
+        var bestDistance = Float.MAX_VALUE
+        for ((j, line) in lines.withIndex()) {
+            val baseline = line.value
+            // Sits on the baseline, or hangs below it the way a descender does.
+            val anchored =
+                o >= baseline - descenderAllowancePt && o <= baseline + aboveThresholdPt
+            // Rides above the baseline: a quote or an '=' sign.
+            val raised = short && o > baseline && o - baseline <= raisedAllowancePt
+            if (!anchored && !raised) continue
+            val distance = if (raised) o - baseline else abs(o - baseline)
+            if (distance < bestDistance) {
+                bestDistance = distance
+                best = j
             }
-            clusterOffsets.add(offset)
-            clusterMembers.add(mutableListOf())
-            target = clusterOffsets.size - 1
         }
-        clusterMembers[target].addAll(entry.value)
-        entry.value.forEach { clusters[it] = target }
+        if (best < 0) {
+            for ((j, line) in lines.withIndex()) {
+                val distance = abs(o - line.value)
+                if (distance < bestDistance) {
+                    bestDistance = distance
+                    best = j
+                }
+            }
+        }
+        assignments[i] = best
     }
-
-    return clusters
+    return assignments
 }
+
+
 
 /**
  * Split each [fragment] into one or more [TextLine] objects.
