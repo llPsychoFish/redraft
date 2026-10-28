@@ -81,6 +81,8 @@ status: complete
 4. **Task 4: Themed overlay with non-editable variant** - `58ce418` (feat)
 5. **Task 5: Extraction lifecycle and messaging** - `0c8e42d` (feat)
 6. **Fix: Reducer baseline clustering** - `0516abb` (fix)
+7. **Test: Real PDFium line-reduction regression** - `2c6599a` (test)
+8. **Fix: Baseline clustering from PDFium ink boxes** - `1d45d47` (fix)
 
 ## Files Created/Modified
 - `pdfcore/src/main/kotlin/com/redraft/pdfcore/selection/LineReducer.kt` - D-12 gap rules, baseline-direction measurement
@@ -99,6 +101,19 @@ None - plan executed exactly as written.
 
 ## Issues Encountered
 None
+
+## Follow-up: real PDFium ink boxes
+The synthetic `LineMergeTest` fixtures model every glyph box as a full-em
+box, so they never exercised the geometry PDFium really reports. On a real
+page the reducer shattered 21 visual lines into 190: descenders and brackets
+hang ~0.2 em below the baseline and each formed a line, while raised quotes
+and `=` signs pulled their line's baseline upward.
+
+Anchor glyphs now vote for the baseline, a weaker cluster inside the
+descender allowance folds into the line above it, and short glyphs land on
+the line they ride above. Equal-support clusters stay separate, so D-13
+superscripts are unaffected. Covered by `RealPdfiumLineReductionTest`
+(729 real chars, 21 lines, tap selection on the whole line).
 
 ## Next Phase Readiness
 Phase 02 complete - all selection/hit-testing infrastructure ready for Phase 03 (Text Editing MVP). Block grouping provides metadata for future editing operations without affecting selection behavior.
