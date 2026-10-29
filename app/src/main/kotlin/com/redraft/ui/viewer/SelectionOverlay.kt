@@ -38,6 +38,7 @@ data class SelectionOverlayState(
     val selectedLine: TextLine? = null,
     val blockId: String? = null,
     val editable: Boolean = true,
+    val pageIndex: Int = 0,
 )
 
 // ─── Overlay ─────────────────────────────────────────────────────────────────
@@ -67,14 +68,13 @@ data class SelectionOverlayState(
 @Composable
 fun SelectionOverlay(
     pageIndex: Int,
-    visiblePageIndex: Int,
     state: SelectionOverlayState?,
     viewport: ViewportState,
     transform: PdfViewportTransform,
     modifier: Modifier = Modifier,
 ) {
     // Show only on the page that owns the selection.
-    if (state == null || state.selectedLine == null || pageIndex != visiblePageIndex) return
+    if (state == null || state.selectedLine == null || pageIndex != state.pageIndex) return
 
     val line = state.selectedLine
     val editable = state.editable && line.fragment.editable

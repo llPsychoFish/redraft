@@ -85,6 +85,8 @@ data class ViewerUiState(
 const val MIN_ZOOM = 1f
 const val MAX_ZOOM = 5f
 
+private const val TAG = "PdfViewerViewModel"
+
 /**
  * Per-page text extraction state (D-28 … D-31).
  *
@@ -202,6 +204,13 @@ class PdfViewerViewModel(
     private var lastMessagePageIndex: Int? = null
     private var lastVisiblePageIndex: Int? = null
 
+    /** Dropped taps awaiting extraction completion (B6, B8). */
+    private val droppedTaps = mutableMapOf<Int, PdfPoint>()
+
+    /** Flag: set when edit mode is turned on, so onVisiblePagesChanged can
+     *  start extraction for initially-visible pages. */
+    private var editModeJustStarted = false
+
     /** Number of cached page layouts — exposed for the lifecycle unit tests. */
     internal val cachedLayoutCount: Int get() = textLayoutCache.size
 
@@ -236,12 +245,15 @@ class PdfViewerViewModel(
         viewport: ViewportState,
         transform: PdfViewportTransform,
     ) {
-        // Read mode: a tap toggles the chrome, it never selects (D-19).
-        if (!_editMode.value) return
+        if (!_editMode.value) {
+            // Log.d(TAG, "Tap ignored: in read mode")
+            return
+        }
 
         viewModelScope.launch {
             val handle = currentHandle ?: return@launch
 
+            // Log.d(TAG, "Starting extraction for page $pageIndex")
             when (val state = awaitPageText(pageIndex, handle)) {
                 is PageTextState.Ready -> {
                     // A miss on a page that HAS text merely clears the
@@ -255,6 +267,7 @@ class PdfViewerViewModel(
                             selectedLine = it.line,
                             blockId = it.line.blockId,
                             editable = it.line.fragment.editable,
+                            pageIndex = pageIndex,
                         )
                     }
                     if (result == null) selectionPageIndex = null
@@ -377,11 +390,13 @@ class PdfViewerViewModel(
         if (visiblePage != lastVisiblePageIndex) {
             lastVisiblePageIndex = visiblePage
             lastMessagePageIndex = null
+            // Log.d(TAG, "onVisiblePagesChanged: visiblePage=$visiblePage")
         }
 
         // Cancel the extraction of every page that left the screen.
         val gone = extractionJobs.keys - visible
         for (page in gone) {
+            // Log.d(TAG, "Cancelling extraction for page $page")
             extractionJobs.remove(page)?.cancel()
             pageTextStates.remove(page)
         }
@@ -394,6 +409,24 @@ class PdfViewerViewModel(
             textLayoutCache.remove(page)
             pageTextStates.remove(page)
         }
+
+        // When edit mode is on, start extraction for pages that are visible.
+        val alreadyKnown = textLayoutCache.keys + extractionJobs.keys + pageTextStates.keys
+        val toExtract = visible - alreadyKnown
+        for (page in toExtract) {
+            startExtraction(page, currentHandle!!)
+        }
+
+        // If edit mode just started, also start extraction for all currently
+        // visible pages (they may not have triggered onVisiblePagesChanged
+        // with the new edit-mode flag yet).
+        if (editModeJustStarted) {
+            editModeJustStarted = false
+            for (page in visible - alreadyKnown) {
+                startExtraction(page, currentHandle!!)
+            }
+        }
+
         enforceLayoutCacheLimit()
     }
 
@@ -401,7 +434,18 @@ class PdfViewerViewModel(
     fun setEditMode(enabled: Boolean) {
         if (_editMode.value == enabled) return
         _editMode.value = enabled
-        if (!enabled) clearSelection()
+        if (!enabled) {
+            clearSelection()
+            // Cancel all in-flight extraction jobs when leaving edit mode.
+            extractionJobs.values.forEach { it.cancel() }
+            extractionJobs.clear()
+            pageTextStates.clear()
+            textLayoutCache.clear()
+            droppedTaps.clear()
+            editModeJustStarted = false
+        } else {
+            editModeJustStarted = true
+        }
     }
 
     /** Toggles Edit mode (D-18). */

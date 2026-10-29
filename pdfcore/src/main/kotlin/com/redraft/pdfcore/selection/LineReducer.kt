@@ -401,6 +401,19 @@ fun splitFragmentIntoLines(fragment: TextFragment): List<TextLine> {
     var currentCluster = -1
 
     for (char in chars) {
+        // CR or LF ends the current line; the CR/LF itself is dropped.
+        // Whitespace that follows belongs to the NEXT line, not the previous one.
+        if (char.text == "\r" || char.text == "\n") {
+            // Flush any accumulated line chars before ending the line
+            if (lineChars.isNotEmpty()) {
+                lines.add(makeLine(lineChars, fragment))
+                lineChars = mutableListOf()
+                lastGlyph = null
+            }
+            // currentCluster stays as-is so the next line starts fresh
+            continue
+        }
+
         if (isGapOnlyChar(char)) {
             // Whitespace rides along with the line it follows; it contributes
             // to the gap but never to the union.
@@ -554,7 +567,7 @@ internal fun glyphUnion(chars: List<CharBox>): PdfRect {
     val result = PdfRect(Float.MAX_VALUE, Float.MAX_VALUE, -Float.MAX_VALUE, -Float.MAX_VALUE)
     var hasReal = false
     for (c in chars) {
-        if (c.rect.width < 0.01f) continue  // zero-width: contribute gap, not union
+        if (c.rect.width < 0.01f || c.text.isBlank()) continue  // zero-width or blank: contribute gap, not union
         hasReal = true
         result.minX = minOf(result.minX, c.rect.minX)
         result.minY = minOf(result.minY, c.rect.minY)
@@ -562,7 +575,7 @@ internal fun glyphUnion(chars: List<CharBox>): PdfRect {
         result.maxY = maxOf(result.maxY, c.rect.maxY)
     }
     if (!hasReal) {
-        // All zero-width chars: use bounding box of the zero-width chars themselves
+        // All zero-width or blank chars: use bounding box of the chars themselves
         for (c in chars) {
             result.minX = minOf(result.minX, c.rect.minX)
             result.minY = minOf(result.minY, c.rect.minY)

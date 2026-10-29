@@ -61,6 +61,7 @@ import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.viewer.SelectionOverlay
 import com.redraft.ui.viewer.SelectionOverlayState
+import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -490,6 +491,13 @@ private fun PdfPageItem(
         transform?.renderedSize(zoom)
     }
 
+    // Page's real left edge: the offset from the slot origin to the page's
+    // actual rendered content. At fit width this is 0; when zoomed the page
+    // is centred, so the left edge is negative.
+    val displayWidthPx: Float = display?.widthPx?.toFloat() ?: 0f
+    val slotWidthPx = viewportWidthPx.toFloat().coerceIn(0f, displayWidthPx)
+    val pageLeftPx = (slotWidthPx - displayWidthPx) / 2f + panX
+
     // Re-render only when the pinch has settled (D-09): renderTick increments
     // 250 ms after the zoom stops moving. The bucket is read at that moment, so
     // a mid-gesture bucket crossing never triggers a render.
@@ -580,25 +588,38 @@ private fun PdfPageItem(
             // we intercept single-pointer taps only.
             val currentTransform = transform
             if (currentTransform != null) {
+                val latestTransform = rememberUpdatedState(currentTransform)
+                val latestViewport = rememberUpdatedState(ViewportState(zoom, pageLeftPx, 0f))
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(pageIndex) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = true)
-                                val tap = PdfPoint(down.position.x, down.position.y)
-                                onTap(tap, pageIndex, ViewportState(zoom, panX, 0f), currentTransform)
+                                // Detect tap: only fire onTap if finger lifts without
+                                // moving beyond touch slop.
+                                val up = awaitPointerEvent().changes.firstOrNull { it.pressed }
+                                if (up != null) {
+                                    val dx = Math.abs(up.position.x - down.position.x)
+                                    val dy = Math.abs(up.position.y - down.position.y)
+                                    val distance = dx + dy
+                                    if (distance > viewConfiguration.touchSlop) {
+                                        // Significant movement: not a tap, skip
+                                        return@awaitEachGesture
+                                    }
+                                }
+                                onTap(PdfPoint(down.position.x, down.position.y), pageIndex,
+                                    ViewportState(zoom, panX, 0f), currentTransform)
                             }
                         },
                 ) {
                     // Draw the selection caret if this page is selected
                     SelectionOverlay(
                         pageIndex = pageIndex,
-                        visiblePageIndex = visiblePageIndex,
-                        state = selectionState,
-                        viewport = com.redraft.pdfcore.ViewportState(zoom, panX, 0f),
-                        transform = currentTransform,
-                    )
+                        state = selectionState?.copy(pageIndex = pageIndex) ?: SelectionOverlayState(),
+                        viewport = latestViewport.value,
+                        transform = latestTransform.value,
+                )
                 }
             }
         }
