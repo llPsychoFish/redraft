@@ -71,6 +71,19 @@ fun panBounds(viewportWidthPx: Float, zoom: Float): ClosedFloatingPointRange<Flo
 }
 
 /**
+ * Where the page's LEFT edge sits inside its slot, in slot pixels.
+ *
+ * The slot is never wider than the viewport (layout clamps it), but a zoomed page is. The page
+ * is centred on the slot and then shifted by [panX], so
+ * `left = (slotWidth - pageWidth) / 2 + panX`. At zoom 1 this is just [panX]; zoomed in it is
+ * negative. The pdf<->screen transform wants exactly this value as its pan, and it was being
+ * handed the raw [panX], which put every tap and every highlight off by half the overflow
+ * as soon as the page was zoomed.
+ */
+fun pageLeftInSlotPx(slotWidthPx: Int, pageWidthPx: Int, panX: Float): Float =
+    if (slotWidthPx <= 0 || pageWidthPx <= 0) panX else (slotWidthPx - pageWidthPx) / 2f + panX
+
+/**
  * The horizontal pan, clamped to the content bounds.
  *
  * A zoomed page is wider than the viewport, so it can be panned sideways -
@@ -84,10 +97,14 @@ fun clampPanX(panX: Float, viewportWidthPx: Float, zoom: Float): Float =
  * Whether a requested pan actually moves the page.
  *
  * False means the pan is already at a boundary and the request pushes
- * further out - the page cannot move any further in that direction. The
- * caller uses this to decide whether to keep consuming the gesture: at a
- * boundary the gesture must be released so the list scroll can take it
- * (the edge lock of a nested pan/scroll pair).
+ * further out - the page cannot move any further in that direction.
+ *
+ * The one-finger pan reducer ([PanGestureMath.panFrame]) now owns the
+ * consume/release decision; this predicate remains the tested reference
+ * for the boundary. The reducer deliberately does NOT call it: it consumes
+ * the frame that reaches an edge (and applies the clamped pan), whereas
+ * this predicate returns false for an in-bounds request beyond the bound,
+ * which would release that edge-reaching frame.
  */
 fun panWouldMove(
     requestedPanX: Float,

@@ -83,6 +83,7 @@ android {
 
 dependencies {
     implementation(project(":pdfcore"))
+    implementation(libs.io.legere.pdfiumandroid)
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)

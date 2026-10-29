@@ -25,10 +25,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
@@ -46,14 +48,19 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
-import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfPageGeometry
+import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfViewportTransform
+import com.redraft.pdfcore.ViewportState
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
+import com.redraft.ui.viewer.SelectionOverlay
+import com.redraft.ui.viewer.SelectionOverlayState
 import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -74,6 +81,7 @@ fun PdfViewerScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val handle by viewModel.handle.collectAsStateWithLifecycle()
+    val selectionState by viewModel.selectionState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     // The cache is OWNED by the ViewModel, not by this composition: leaving the viewer to open
     // the page overview must not throw away every rendered page, and recycling happens in
@@ -115,11 +123,23 @@ fun PdfViewerScreen(
             .collect { (index, offset) -> viewModel.onScroll(index, offset) }
     }
 
+    // Report the pages that are on screen (D-28): the ViewModel cancels the
+    // extraction of a page that left the viewport and evicts its cached
+    // layout.  The selected page keeps its layout so the overlay survives.
+    LaunchedEffect(listState) {
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.map { it.index }.toSet() }
+            .collect { visible -> viewModel.onVisiblePagesChanged(visible) }
+    }
+
     BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
     ) {
         val density = LocalDensity.current
         val viewportWidthPx = with(density) { maxWidth.toPx() }.roundToInt()
+        // The width the gesture handlers clamp against, held in a State and read at
+        // USE time. The pointer blocks are keyed so Compose never restarts them, so
+        // they must not capture this value (01.1-REVIEW W-01).
+        val currentViewportWidthPx = rememberUpdatedState(viewportWidthPx)
 
         if (uiState.pageCount == 0) {
             Box(
@@ -140,7 +160,7 @@ fun PdfViewerScreen(
                 state = listState,
                 modifier = Modifier
                     .fillMaxSize()
-                    .zoomInput(viewModel, listState, viewportWidthPx)
+                    .zoomInput(viewModel, listState, currentViewportWidthPx)
                     .singlePointerDoubleTap(onSingleTap = onSingleTap) {
                         val current = viewModel.uiState.value.zoom
                         val target = if (current > 1.2f) 1f else 2f
@@ -172,6 +192,10 @@ fun PdfViewerScreen(
                         viewportWidthPx = viewportWidthPx,
                         handle = handle,
                         cache = cache,
+                        selectionState = selectionState,
+                        onTap = { tapScreen, pageIdx, viewport, transform ->
+                            viewModel.onTap(tapScreen, pageIdx, viewport, transform)
+                        },
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 }
@@ -194,7 +218,13 @@ fun PdfViewerScreen(
 private fun Modifier.zoomInput(
     viewModel: PdfViewerViewModel,
     listState: LazyListState,
-    viewportWidthPx: Int,
+    // A State, not an Int: the pointer block below is keyed on `Unit`, so Compose
+    // reuses its node and never restarts the block. A captured Int would keep its
+    // first-composition value, and every clamp after a rotation, a multi-window
+    // resize or a fold would then be computed against the old viewport
+    // (01.1-REVIEW W-01). Reading `.value` at each use keeps an in-flight pan or
+    // pinch alive across the resize instead of tearing the gesture down.
+    viewportWidthPx: State<Int>,
 ): Modifier = this
     .pointerInput(Unit) {
         // Custom multi-touch handler (gap G-01-5): detectTransformGestures never reached
@@ -203,15 +233,14 @@ private fun Modifier.zoomInput(
         // and only consume once both are down, leaving single-finger drags to the list.
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
-            val downPosition = down.position
             val pointerId = down.id
-            // The horizontal-pan mode is decided ONCE per gesture: a drag that
+            // The horizontal-pan mode is decided ONCE per segment: a drag that
             // changes direction halfway through must not flip modes.
-            var horizontalDrag = false
-            var lastPanDx = 0f
+            var panState = panSegmentStart(down.position.x, down.position.y)
+            // True while the current gesture is a pinch; the first single-pointer
+            // frame afterwards starts a fresh segment at the remaining finger.
+            var wasPinching = false
             var previousPair: TouchPair? = null
-            // Track the last known pointer position for incremental pan delta.
-            var lastPosition = downPosition
             try {
                 while (true) {
                     val event = awaitPointerEvent()
@@ -220,8 +249,8 @@ private fun Modifier.zoomInput(
                     if (pressed.size >= 2) {
                         // The pinch takes over: the leftover horizontal state must
                         // not be applied later.
-                        horizontalDrag = false
-                        lastPanDx = 0f
+                        panState = panState.copy(horizontal = false)
+                        wasPinching = true
                         // The gesture owns the scroll position from here on: the
                         // scroll-restore effect must not fight the focal anchoring.
                         viewModel.onGestureActiveChanged(true)
@@ -270,7 +299,7 @@ private fun Modifier.zoomInput(
                             // drift is dropped: the list scroll owns that axis (D-06).
                             val pan = viewModel.uiState.value.panX + delta.panX
                             viewModel.onPanChanged(
-                                clampPanX(pan, viewportWidthPx.toFloat(), after),
+                                clampPanX(pan, viewportWidthPx.value.toFloat(), after),
                             )
                         }
                         previousPair = currentPair
@@ -289,47 +318,34 @@ private fun Modifier.zoomInput(
                         // direction halfway through.
                         previousPair = null
                         val zoom = viewModel.uiState.value.zoom
+                        val resumedAfterPinch = wasPinching
+                        wasPinching = false
                         if (zoom > MIN_ZOOM) {
-                            val change = event.changes.firstOrNull { it.id == pointerId }
-                                ?: event.changes.first()
-                            // Track previous position for incremental delta.
-                            val dx = change.position.x - lastPosition.x
-                            lastPosition = change.position
-                            val dy = change.position.y - downPosition.y
-                            if (!horizontalDrag) {
-                                if (abs(dx) > viewConfiguration.touchSlop &&
-                                    abs(dx) > abs(dy)
-                                ) {
-                                    horizontalDrag = true
-                                    // The pan is incremental: the delta applied from
-                                    // now on is the CHANGE since the last frame, so
-                                    // the page does not jump by the whole drag
-                                    // distance on the first panned frame.
-                                    lastPanDx = dx
-                                    // Take over the gesture: stop the list from scrolling.
-                                    change.consume()
-                                }
-                            } else {
-                                // Already panning: apply the horizontal delta and keep the
-                                // gesture away from the list scroll.
-                                //
-                                // At a boundary the page cannot move any further in this
-                                // direction, so the gesture is RELEASED instead of
-                                // swallowed: the change is not consumed, the pan stays
-                                // where it is, and the LazyColumn's own detector can
-                                // take the gesture back. Consuming it unconditionally
-                                // would lock the user into a horizontal drag that does
-                                // nothing.
-                                val requested = viewModel.uiState.value.panX + dx - lastPanDx
-                                val clamped = clampPanX(requested, viewportWidthPx.toFloat(), zoom)
-                                if (panWouldMove(requested, viewportWidthPx.toFloat(), zoom)) {
-                                    change.consume()
-                                    viewModel.onPanChanged(clamped)
-                                }
-                                // The delta is tracked either way, so that reversing
-                                // direction at a boundary resumes the pan on the very
-                                // next frame without a jump.
-                                lastPanDx = dx
+                            // Prefer the original pointer, but it may be the one lifted at the
+                            // end of the pinch: fall back to a PRESSED change, never a lifted
+                            // one, or the next delta spans both fingers and jumps the page.
+                            val change = pressed.firstOrNull { it.id == pointerId }
+                                ?: pressed.first()
+                            if (resumedAfterPinch) {
+                                // The pointer that remains after a pinch is at a new
+                                // place: start a fresh segment here so the first delta
+                                // is measured from this position, not from before the
+                                // pinch.
+                                panState = panSegmentStart(change.position.x, change.position.y)
+                            }
+                            val frame = panFrame(
+                                state = panState,
+                                panX = viewModel.uiState.value.panX,
+                                x = change.position.x,
+                                y = change.position.y,
+                                touchSlop = viewConfiguration.touchSlop,
+                                viewportWidthPx = viewportWidthPx.value.toFloat(),
+                                zoom = zoom,
+                            )
+                            panState = frame.state
+                            if (frame.consume) {
+                                change.consume()
+                                viewModel.onPanChanged(frame.panX)
                             }
                         }
                     }
@@ -395,6 +411,8 @@ private fun PdfPageItem(
     viewportWidthPx: Int,
     handle: DocumentHandle?,
     cache: PageBitmapCache,
+    selectionState: SelectionOverlayState?,
+    onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Where the LIVE zoom would render.
@@ -408,7 +426,7 @@ private fun PdfPageItem(
         val cached = cache.acquire(PageKey(pageIndex, liveBucket))
         mutableStateOf(cached?.let { RenderedPage(it, liveBucket) })
     }
-    var pageSize by remember(pageIndex) { mutableStateOf<PdfPageSize?>(null) }
+    var pageSize by remember(pageIndex) { mutableStateOf<PdfPageGeometry?>(null) }
     var renderTick by remember { mutableIntStateOf(0) }
 
     // The bucket the bitmap on screen was actually rendered at. This is NOT the
@@ -443,18 +461,22 @@ private fun PdfPageItem(
         }
     }
 
+    // The transform is the ONLY place rotation and the CropBox offset live
+    // (D-02, D-14): the slot base size comes from the shared geometry rule and
+    // the crop origin rides the transform — no rotation arithmetic here
+    // (02-RESEARCH §2.3 rule 4).
     val size = pageSize
     val transform = remember(size, viewportWidthPx) {
         size?.let {
-            val baseHeightPx = (viewportWidthPx * it.heightPt / it.widthPt)
-                .roundToInt()
-                .coerceAtLeast(1)
+            val base = it.slotBaseSizePx(viewportWidthPx)
             PdfViewportTransform(
                 pageWidthPt = it.widthPt,
                 pageHeightPt = it.heightPt,
                 rotationDegrees = it.rotationDegrees,
-                renderedWidthPx = viewportWidthPx,
-                renderedHeightPx = baseHeightPx,
+                renderedWidthPx = base.widthPx,
+                renderedHeightPx = base.heightPx,
+                cropOriginX = it.cropBox.minX,
+                cropOriginY = it.cropBox.minY,
             )
         }
     }
@@ -466,6 +488,13 @@ private fun PdfPageItem(
     val display = remember(transform, zoom) {
         transform?.renderedSize(zoom)
     }
+
+    // Page's real left edge: the offset from the slot origin to the page's
+    // actual rendered content. At fit width this is 0; when zoomed the page
+    // is centred, so the left edge is negative.
+    val displayWidthPx: Float = display?.widthPx?.toFloat() ?: 0f
+    val slotWidthPx = viewportWidthPx.toFloat().coerceIn(0f, displayWidthPx)
+    val pageLeftPx = (slotWidthPx - displayWidthPx) / 2f + panX
 
     // Re-render only when the pinch has settled (D-09): renderTick increments
     // 250 ms after the zoom stops moving. The bucket is read at that moment, so
@@ -550,6 +579,56 @@ private fun PdfPageItem(
                     }
                     .semantics { contentDescription = "Page ${pageIndex + 1} of $pageCount" },
             )
+
+            // Text-selection tap handler (Phase 2, D-06): runs on every tap
+            // that is NOT a pinch. The double-tap-to-zoom is handled by the
+            // zoomInput modifier on the outer LazyColumn (separate pointer). Here
+            // we intercept single-pointer taps only.
+            val currentTransform = transform
+            if (currentTransform != null) {
+                val latestTransform = rememberUpdatedState(currentTransform)
+                val latestViewport = rememberUpdatedState(ViewportState(zoom, pageLeftPx, 0f))
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(pageIndex) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = true)
+                                // Detect tap: only fire onTap if finger lifts without
+                                // moving beyond touch slop.
+                                val up = awaitPointerEvent().changes.firstOrNull { it.pressed }
+                                if (up != null) {
+                                    val dx = Math.abs(up.position.x - down.position.x)
+                                    val dy = Math.abs(up.position.y - down.position.y)
+                                    val distance = dx + dy
+                                    if (distance > viewConfiguration.touchSlop) {
+                                        // Significant movement: not a tap, skip
+                                        return@awaitEachGesture
+                                    }
+                                }
+                                // Read the viewport at tap time. The pointer block
+                                // is keyed on pageIndex, which never changes, so
+                                // anything it captured instead would be frozen at
+                                // first composition and every tap after a pinch
+                                // would be converted with the old zoom.
+                                onTap(
+                                    PdfPoint(down.position.x, down.position.y),
+                                    pageIndex,
+                                    latestViewport.value,
+                                    latestTransform.value,
+                                )
+                            }
+                        },
+                ) {
+                    // Draw the selection caret if this page is selected
+                    SelectionOverlay(
+                        pageIndex = pageIndex,
+                        state = selectionState,
+                        viewport = latestViewport.value,
+                        transform = latestTransform.value,
+                    )
+                }
+            }
         }
     }
 }

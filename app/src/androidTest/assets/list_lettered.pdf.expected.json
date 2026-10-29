@@ -1,0 +1,43 @@
+{
+  "lines": [
+    {
+      "text": "1. Numbered item",
+      "originPt": [
+        72.0,
+        700.0
+      ],
+      "widthPt": 95.36,
+      "heightPt": 12.0,
+      "charRange": [
+        0,
+        16
+      ]
+    },
+    {
+      "text": "a) Lettered item",
+      "originPt": [
+        72.0,
+        680.0
+      ],
+      "widthPt": 84.04,
+      "heightPt": 12.0,
+      "charRange": [
+        16,
+        32
+      ]
+    },
+    {
+      "text": "iii. Roman item",
+      "originPt": [
+        72.0,
+        660.0
+      ],
+      "widthPt": 79.34,
+      "heightPt": 12.0,
+      "charRange": [
+        32,
+        47
+      ]
+    }
+  ]
+}

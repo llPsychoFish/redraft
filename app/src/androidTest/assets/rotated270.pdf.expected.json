@@ -1,0 +1,17 @@
+{
+  "lines": [
+    {
+      "text": "Hello World",
+      "originPt": [
+        100,
+        700
+      ],
+      "widthPt": 132.0,
+      "heightPt": 24,
+      "charRange": [
+        0,
+        11
+      ]
+    }
+  ]
+}

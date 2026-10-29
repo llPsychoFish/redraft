@@ -2,16 +2,11 @@ package com.redraft.pdfcore
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import com.redraft.pdfcore.selection.PageTextLayout
 import io.legere.pdfiumandroid.suspend.PdfDocumentKt
 import io.legere.pdfiumandroid.suspend.PdfiumCoreKt
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.withContext
-
-data class PdfPageSize(
-    val widthPt: Float,
-    val heightPt: Float,
-    val rotationDegrees: Int,
-)
 
 /**
  * Single-owner handle over an open PDFium document (decision D-12).
@@ -22,8 +17,10 @@ data class PdfPageSize(
  * within each call (`use { }`). [close] is idempotent.
  */
 class PdfDocumentHandle private constructor(
-    private val document: PdfDocumentKt,
+    private val _document: PdfDocumentKt,
 ) {
+    /** Exposes the underlying Pdfium document for text extraction. */
+    val document: PdfDocumentKt get() = _document
 
     private val closed = AtomicBoolean(false)
 
@@ -37,19 +34,39 @@ class PdfDocumentHandle private constructor(
         return document.getPageCount()
     }
 
-    suspend fun pageSize(index: Int): PdfPageSize {
+    suspend fun pageSize(index: Int): PdfPageGeometry {
         assertNotMainThread()
         checkOpen()
         require(index in 0 until pageCount()) { "Page index $index out of bounds" }
         val page = document.openPage(index)
             ?: error("PDFium could not open page $index")
         return page.use {
-            PdfPageSize(
-                widthPt = it.getPageWidthPoint().toFloat(),
-                heightPt = it.getPageHeightPoint().toFloat(),
-                rotationDegrees = it.getPageRotation() * 90,
+            // Page boxes arrive as four positional numbers whose field names are
+            // assigned positionally, not semantically (02-RESEARCH §1.3).
+            // PdfPageGeometry.build normalises them, honours the (-1,-1,-1,-1)
+            // sentinel, intersects crop with media, and coerces the rotation
+            // index so -1 can never become 270° (02-RESEARCH §2.3).
+            val crop = it.getPageCropBox()
+            val media = it.getPageMediaBox()
+            PdfPageGeometry.build(
+                pageIndex = index,
+                cropValues = floatArrayOf(crop.left, crop.top, crop.right, crop.bottom),
+                mediaValues = floatArrayOf(media.left, media.top, media.right, media.bottom),
+                rawRotation = it.getPageRotation(),
             )
         }
+    }
+
+    /**
+     * Extract one page's text as plain data (D-23). Handle discipline lives here
+     * (open-state and bounds checks); the extraction itself is the selection
+     * package's `pageTextLayout`, which closes its own page and text page.
+     */
+    suspend fun pageTextLayout(index: Int, geometry: PdfPageGeometry): PageTextLayout {
+        assertNotMainThread()
+        checkOpen()
+        require(index in 0 until pageCount()) { "Page index $index out of bounds" }
+        return com.redraft.pdfcore.selection.pageTextLayout(document, index, geometry)
     }
 
     suspend fun renderPage(

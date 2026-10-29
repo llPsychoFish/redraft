@@ -11,15 +11,28 @@ import com.redraft.data.RecentFile
 import com.redraft.data.RecentsStore
 import com.redraft.data.upsert
 import com.redraft.pdfcore.PdfDocumentSource
-import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfPageGeometry
+import com.redraft.pdfcore.PdfPoint
+import com.redraft.pdfcore.PdfRect
+import com.redraft.pdfcore.PdfViewportTransform
+import com.redraft.pdfcore.ViewportState
+import com.redraft.pdfcore.selection.CharBox
+import com.redraft.pdfcore.selection.PageTextLayout
+import com.redraft.pdfcore.selection.TextPageLayout
+import io.legere.pdfiumandroid.suspend.PdfDocumentKt
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -73,11 +86,15 @@ class PdfViewerViewModelTest {
         private val name: String,
         private val log: MutableList<String>,
     ) : DocumentHandle {
+        override val document: PdfDocumentKt
+            get() = throw UnsupportedOperationException("document not used in view model tests")
+
         override suspend fun open(source: PdfDocumentSource) {
             log += "open:$name"
         }
 
-        override suspend fun pageSize(index: Int): PdfPageSize = PdfPageSize(612f, 792f, 0)
+        override suspend fun pageSize(index: Int): PdfPageGeometry =
+            PdfPageGeometry(pageIndex = index, cropBox = PdfRect(0f, 0f, 612f, 792f), rotationIndex = 0)
 
         override suspend fun renderPage(
             index: Int,
@@ -93,6 +110,7 @@ class PdfViewerViewModelTest {
     private fun viewModel(
         recents: RecentsStore,
         log: MutableList<String> = mutableListOf(),
+        extractor: suspend (DocumentHandle, Int) -> PageTextLayout = { _, _ -> PageTextLayout.Empty },
         opener: (String) -> Result<DocumentHandle>,
     ): PdfViewerViewModel = PdfViewerViewModel(
         recentsRepository = recents,
@@ -101,6 +119,8 @@ class PdfViewerViewModelTest {
         clock = { 0L },
         ioDispatcher = dispatcher,
         cleanupScope = CoroutineScope(SupervisorJob() + dispatcher),
+        computeDispatcher = dispatcher,
+        extractPageText = extractor,
     )
 
     @Test
@@ -323,5 +343,166 @@ class PdfViewerViewModelTest {
         assertEquals(false, state.isLoading)
         assertNull(state.error)
         assertEquals(listOf("uri-ok"), recents.recents.value.map { it.uri })
+    }
+
+    // ─── Extraction lifecycle (D-28 … D-31) ─────────────────────────────────
+
+    /** A one-line layout: the glyph "H" at PDF (100, 700), 10 pt wide. */
+    private fun textLayout(pageIndex: Int = 0): TextPageLayout = TextPageLayout(
+        pageIndex = pageIndex,
+        chars = listOf(
+            CharBox(
+                index = 0,
+                text = "H",
+                rect = PdfRect(100f, 700f, 110f, 710f),
+                fontSizePt = 10f,
+            ),
+        ),
+    )
+
+    private val viewport = ViewportState(zoom = 1f, panX = 0f, panY = 0f)
+    private val transform = PdfViewportTransform(
+        pageWidthPt = 612f,
+        pageHeightPt = 792f,
+        rotationDegrees = 0,
+        renderedWidthPx = 612,
+        renderedHeightPx = 792,
+    )
+
+    /** Screen point that lands on the glyph of [textLayout] (PDF y is flipped). */
+    private val tapOnText = PdfPoint(105f, 92f)
+
+    private fun TestScope.openInEditMode(
+        vm: PdfViewerViewModel,
+    ) {
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+    }
+
+    @Test
+    fun a_tap_during_loading_resolves_when_the_extraction_completes() = runTest(dispatcher) {
+        val gate = CompletableDeferred<PageTextLayout>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> gate.await() },
+        )
+        openInEditMode(vm)
+
+        vm.onTap(tapOnText, 0, viewport, transform)
+        runCurrent()
+        // The extraction is still running: the tap waits, nothing is selected.
+        assertNull(vm.selectionState.value)
+
+        gate.complete(PageTextLayout.Ready(textLayout()))
+        runCurrent()
+
+        assertNotNull("the tap must resolve once the extraction finished", vm.selectionState.value)
+        assertEquals(1, vm.cachedLayoutCount)
+    }
+
+    @Test
+    fun a_tap_still_pending_after_one_second_is_dropped_without_a_selection_change() = runTest(dispatcher) {
+        val gate = CompletableDeferred<PageTextLayout>()
+        val received = mutableListOf<ViewerMessage>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> gate.await() },
+        )
+        backgroundScope.collectMessages(vm, received)
+        openInEditMode(vm)
+
+        vm.onTap(tapOnText, 0, viewport, transform)
+        runCurrent()
+        assertNull(vm.selectionState.value)
+
+        // One second of virtual time passes with the extraction still running.
+        advanceTimeBy(EXTRACTION_WAIT_MS)
+        runCurrent()
+
+        assertNull("the tap must be dropped, with no selection change", vm.selectionState.value)
+        assertTrue("a dropped tap must not produce a message", received.isEmpty())
+
+        // The extraction may still finish later — the tap was already dropped.
+        gate.complete(PageTextLayout.Ready(textLayout()))
+        runCurrent()
+        assertNull(vm.selectionState.value)
+    }
+
+    @Test
+    fun two_taps_on_one_empty_page_emit_one_message() = runTest(dispatcher) {
+        val received = mutableListOf<ViewerMessage>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Empty },
+        )
+        backgroundScope.collectMessages(vm, received)
+        openInEditMode(vm)
+
+        vm.onTap(tapOnText, 0, viewport, transform)
+        runCurrent()
+        vm.onTap(tapOnText, 0, viewport, transform)
+        runCurrent()
+
+        assertEquals(1, received.size)
+        assertEquals(ViewerMessage.NoSelectableText, received.single())
+    }
+
+    @Test
+    fun changing_the_visible_page_allows_a_second_message() = runTest(dispatcher) {
+        val received = mutableListOf<ViewerMessage>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(3, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Empty },
+        )
+        backgroundScope.collectMessages(vm, received)
+        openInEditMode(vm)
+
+        vm.onTap(tapOnText, 0, viewport, transform)
+        runCurrent()
+        assertEquals(1, received.size)
+
+        // The reader leaves page 0 for page 1: the rate limit is cleared.
+        vm.onVisiblePagesChanged(setOf(1))
+        vm.onTap(tapOnText, 0, viewport, transform)
+        runCurrent()
+
+        assertEquals(2, received.size)
+    }
+
+    @Test
+    fun closing_the_document_clears_layouts_jobs_selection_and_edit_mode() = runTest(dispatcher) {
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+        )
+        openInEditMode(vm)
+
+        vm.onTap(tapOnText, 0, viewport, transform)
+        runCurrent()
+        assertNotNull(vm.selectionState.value)
+        assertTrue(vm.editMode.value)
+        assertEquals(1, vm.cachedLayoutCount)
+
+        vm.closeDocument()
+        advanceUntilIdle()
+
+        assertNull(vm.selectionState.value)
+        assertEquals(false, vm.editMode.value)
+        assertEquals(0, vm.cachedLayoutCount)
+        assertEquals(0, vm.activeExtractionCount)
+    }
+
+    /** Collects the ViewModel's one-shot messages into [into]. */
+    private fun CoroutineScope.collectMessages(
+        vm: PdfViewerViewModel,
+        into: MutableList<ViewerMessage>,
+    ) {
+        launch { vm.messages.collect { into += it } }
     }
 }

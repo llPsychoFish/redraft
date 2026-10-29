@@ -41,7 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.R
 import com.redraft.data.DocumentHandle
-import com.redraft.pdfcore.PdfPageSize
+import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.ui.PdfViewerViewModel
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
@@ -126,7 +126,7 @@ private fun PageOverviewGrid(
     // The page sizes are fetched ONCE, off the main thread. They are needed
     // for each page's aspect ratio, and the aspect ratio is what gives a
     // thumbnail its height.
-    var pageSizes by remember(handle) { mutableStateOf<List<PdfPageSize?>>(emptyList()) }
+    var pageSizes by remember(handle) { mutableStateOf<List<PdfPageGeometry?>>(emptyList()) }
     LaunchedEffect(handle) {
         val current = handle ?: return@LaunchedEffect
         val count = current.pageCount
@@ -174,7 +174,7 @@ private fun PageOverviewGrid(
 private fun ThumbnailCell(
     pageIndex: Int,
     handle: DocumentHandle?,
-    pageSize: PdfPageSize?,
+    pageSize: PdfPageGeometry?,
     cellWidthPx: Int,
     cache: ThumbnailCache,
     onPageSelected: (Int) -> Unit,
@@ -261,7 +261,7 @@ private fun ThumbnailCell(
  * placeholder. Cancellation, on the other hand, must propagate: swallowing it
  * would keep the effect running after it was cancelled.
  */
-private suspend fun DocumentHandle.safePageSize(index: Int): PdfPageSize? =
+private suspend fun DocumentHandle.safePageSize(index: Int): PdfPageGeometry? =
     try {
         pageSize(index)
     } catch (cancellation: CancellationException) {

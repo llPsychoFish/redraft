@@ -109,4 +109,144 @@ class PdfViewportTransformTest {
         assertEquals(0, PdfViewportTransform.normalizeRotation(360))
         assertEquals(90, PdfViewportTransform.normalizeRotation(449))
     }
+
+    /** The transform a PdfPageItem would build for [rotation] at [viewportWidthPx]. */
+    private fun slotTransform(
+        rotation: Int,
+        viewportWidthPx: Int,
+        cropOriginX: Float = 0f,
+        cropOriginY: Float = 0f,
+    ): PdfViewportTransform {
+        val geometry = PdfPageGeometry.build(
+            pageIndex = 0,
+            cropValues = floatArrayOf(0f, pageHeight, pageWidth, 0f), // [left, top, right, bottom]
+            mediaValues = floatArrayOf(0f, pageHeight, pageWidth, 0f),
+            rawRotation = rotation / 90,
+        )
+        val base = geometry.slotBaseSizePx(viewportWidthPx)
+        return PdfViewportTransform(
+            pageWidthPt = geometry.widthPt,
+            pageHeightPt = geometry.heightPt,
+            rotationDegrees = geometry.rotationDegrees,
+            renderedWidthPx = base.widthPx,
+            renderedHeightPx = base.heightPx,
+            cropOriginX = cropOriginX,
+            cropOriginY = cropOriginY,
+        )
+    }
+
+    @Test
+    fun displayedRectCorners_mapTo_theFourPageCorners_perRotation() {
+        val viewport = ViewportState(zoom = 1f, panX = 0f, panY = 0f)
+        val pageCorners = listOf(
+            PdfPoint(0f, 0f),
+            PdfPoint(pageWidth, 0f),
+            PdfPoint(pageWidth, pageHeight),
+            PdfPoint(0f, pageHeight),
+        )
+
+        listOf(0, 90, 180, 270).forEach { rotation ->
+            val t = transform(rotation)
+            val size = t.renderedSize(1f)
+            val screenCorners = listOf(
+                ScreenPoint(0f, 0f),
+                ScreenPoint(size.widthPx.toFloat(), 0f),
+                ScreenPoint(size.widthPx.toFloat(), size.heightPx.toFloat()),
+                ScreenPoint(0f, size.heightPx.toFloat()),
+            )
+            val mapped = screenCorners.map { t.screenToPdf(it, viewport) }
+
+            pageCorners.forEach { expected ->
+                assertTrue(
+                    "rotation $rotation: expected corner $expected among $mapped",
+                    mapped.any {
+                        abs(it.x - expected.x) <= 0.5f && abs(it.y - expected.y) <= 0.5f
+                    },
+                )
+            }
+        }
+    }
+
+    @Test
+    fun slotBuiltTransform_fillsViewport_atEveryRotation() {
+        val viewportWidthPx = 1080
+
+        listOf(0, 90, 180, 270).forEach { rotation ->
+            val t = slotTransform(rotation, viewportWidthPx)
+
+            assertEquals(
+                "rotation $rotation: fitWidthZoom",
+                1f,
+                t.fitWidthZoom(viewportWidthPx),
+                1e-3f,
+            )
+            assertEquals(
+                "rotation $rotation: rendered width",
+                viewportWidthPx,
+                t.renderedSize(1f).widthPx,
+            )
+            // Integer slot rounding leaves at most half a point of scale skew.
+            assertEquals(
+                "rotation $rotation: scaleX == scaleY",
+                t.scaleX(1f),
+                t.scaleY(1f),
+                0.01f,
+            )
+            assertEquals(
+                "rotation $rotation: scaleX == scaleY at 2x",
+                t.scaleX(2f),
+                t.scaleY(2f),
+                0.02f,
+            )
+        }
+    }
+
+    @Test
+    fun cropOrigin_mapsTo_displayBottomLeft_atRotation0() {
+        // /CropBox [36 36 576 756] → 540x720 crop starting at (36, 36).
+        val geometry = PdfPageGeometry.build(
+            pageIndex = 0,
+            cropValues = floatArrayOf(36f, 756f, 576f, 36f), // [left, top, right, bottom]
+            mediaValues = null,
+            rawRotation = 0,
+        )
+        assertEquals(540f, geometry.widthPt, 1e-3f)
+        assertEquals(720f, geometry.heightPt, 1e-3f)
+
+        val base = geometry.slotBaseSizePx(1080)
+        val transform = PdfViewportTransform(
+            pageWidthPt = geometry.widthPt,
+            pageHeightPt = geometry.heightPt,
+            rotationDegrees = geometry.rotationDegrees,
+            renderedWidthPx = base.widthPx,
+            renderedHeightPx = base.heightPx,
+            cropOriginX = geometry.cropBox.minX,
+            cropOriginY = geometry.cropBox.minY,
+        )
+        val viewport = ViewportState(zoom = 1f, panX = 0f, panY = 0f)
+        val renderedHeight = transform.renderedSize(1f).heightPx.toFloat()
+
+        // The crop origin maps to the display bottom-left (y-down → bottom = max y).
+        val bottomLeft = transform.pdfToScreen(PdfPoint(36f, 36f), viewport)
+        assertApprox(0f, bottomLeft.x, 0.5f)
+        assertApprox(renderedHeight, bottomLeft.y, 0.5f)
+
+        // …and the inverse maps the display bottom-left back to the crop origin.
+        val back = transform.screenToPdf(ScreenPoint(0f, renderedHeight), viewport)
+        assertApprox(36f, back.x, 0.5f)
+        assertApprox(36f, back.y, 0.5f)
+    }
+
+    @Test
+    fun cropOrigin_roundTrips_insetPoint_allRotations() {
+        val viewport = ViewportState(zoom = 2f, panX = 13f, panY = -7f)
+        val pdf = PdfPoint(100f, 200f)
+
+        listOf(0, 90, 180, 270).forEach { rotation ->
+            val transform = slotTransform(rotation, viewportWidthPx = 1080, cropOriginX = 36f, cropOriginY = 36f)
+            val back = transform.screenToPdf(transform.pdfToScreen(pdf, viewport), viewport)
+            assertApprox(pdf.x, back.x)
+            assertApprox(pdf.y, back.y)
+        }
+    }
 }

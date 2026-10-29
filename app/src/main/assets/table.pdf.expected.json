@@ -1,0 +1,43 @@
+{
+  "lines": [
+    {
+      "text": "Name",
+      "originPt": [
+        100,
+        700
+      ],
+      "widthPt": 48.0,
+      "heightPt": 24,
+      "charRange": [
+        0,
+        4
+      ]
+    },
+    {
+      "text": "Age",
+      "originPt": [
+        100,
+        680
+      ],
+      "widthPt": 36.0,
+      "heightPt": 24,
+      "charRange": [
+        5,
+        8
+      ]
+    },
+    {
+      "text": "Email",
+      "originPt": [
+        100,
+        660
+      ],
+      "widthPt": 60.0,
+      "heightPt": 24,
+      "charRange": [
+        10,
+        15
+      ]
+    }
+  ]
+}

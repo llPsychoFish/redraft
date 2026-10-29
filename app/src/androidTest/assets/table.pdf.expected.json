@@ -1,0 +1,82 @@
+{
+  "lines": [
+    {
+      "text": "First Name",
+      "originPt": [
+        72.0,
+        700.0
+      ],
+      "widthPt": 58.67,
+      "heightPt": 12.0,
+      "charRange": [
+        0,
+        10
+      ]
+    },
+    {
+      "text": "Ada Lovelace",
+      "originPt": [
+        140.268,
+        700.0
+      ],
+      "widthPt": 72.71,
+      "heightPt": 12.0,
+      "charRange": [
+        10,
+        22
+      ]
+    },
+    {
+      "text": "Second Name",
+      "originPt": [
+        72.0,
+        680.0
+      ],
+      "widthPt": 76.03,
+      "heightPt": 12.0,
+      "charRange": [
+        22,
+        33
+      ]
+    },
+    {
+      "text": "Alan Turing",
+      "originPt": [
+        157.632,
+        680.0
+      ],
+      "widthPt": 61.36,
+      "heightPt": 12.0,
+      "charRange": [
+        33,
+        44
+      ]
+    },
+    {
+      "text": "Third Name",
+      "originPt": [
+        72.0,
+        660.0
+      ],
+      "widthPt": 62.68,
+      "heightPt": 12.0,
+      "charRange": [
+        44,
+        54
+      ]
+    },
+    {
+      "text": "Grace Hopper",
+      "originPt": [
+        144.27599999999998,
+        660.0
+      ],
+      "widthPt": 75.36,
+      "heightPt": 12.0,
+      "charRange": [
+        54,
+        66
+      ]
+    }
+  ]
+}

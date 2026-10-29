@@ -3,6 +3,8 @@ package com.redraft.ui.viewer
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.pointerInput
@@ -43,6 +45,14 @@ internal fun Modifier.singlePointerDoubleTap(
     onDoubleTap: () -> Unit,
 ): Modifier {
     val doubleTapSlopPx = with(LocalDensity.current) { DOUBLE_TAP_SLOP.toPx() }
+    // The callbacks are read at INVOKE time, never captured. This node is keyed on
+    // `doubleTapSlopPx`, which does not change on rotation, so Compose reuses it and
+    // never restarts the block: a captured callback would freeze the caller's
+    // first-composition closure - in the viewer, the double-tap lambda that
+    // re-clamps with viewportWidthPx - and would freeze the onSingleTap
+    // nullability gate along with it (01.1-REVIEW W-02).
+    val currentOnSingleTap by rememberUpdatedState(onSingleTap)
+    val currentOnDoubleTap by rememberUpdatedState(onDoubleTap)
     return this.pointerInput(doubleTapSlopPx) {
         // The pending-tap timer needs a coroutine scope of its own: the body of
         // awaitEachGesture runs in AwaitPointerEventScope, which cannot launch.
@@ -85,8 +95,14 @@ internal fun Modifier.singlePointerDoubleTap(
             val isTap = tapDuration <= viewConfiguration.longPressTimeoutMillis
             if (sawSecondPointer || wasConsumed || !isTap) {
                 // Not a tap: drop the remembered first tap so a gesture in
-                // between cannot complete a double tap.
+                // between cannot complete a double tap, AND cancel any tap still
+                // waiting out the double-tap window. Without the cancel, a tap
+                // followed by a pan, a pinch or a long press still fired the
+                // single-tap callback mid-gesture once the window elapsed
+                // (01.1-REVIEW W-03).
                 lastTapUpTime = 0L
+                pendingSingleTap?.cancel()
+                pendingSingleTap = null
                 return@awaitEachGesture
             }
 
@@ -98,16 +114,18 @@ internal fun Modifier.singlePointerDoubleTap(
                 lastTapUpTime = 0L
                 pendingSingleTap?.cancel()
                 pendingSingleTap = null
-                onDoubleTap()
+                currentOnDoubleTap()
             } else {
                 lastTapUpTime = upTime
                 lastTapPosition = upPosition
-                if (onSingleTap != null) {
+                if (currentOnSingleTap != null) {
                     pendingSingleTap?.cancel()
                     pendingSingleTap = gestureScope.launch {
                         delay(viewConfiguration.doubleTapTimeoutMillis)
                         pendingSingleTap = null
-                        onSingleTap()
+                        // Read at fire time: if the caller withdrew the callback
+                        // during the window, nothing fires.
+                        currentOnSingleTap?.invoke()
                     }
                 }
             }
