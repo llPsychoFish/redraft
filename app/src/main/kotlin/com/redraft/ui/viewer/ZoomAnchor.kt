@@ -71,6 +71,19 @@ fun panBounds(viewportWidthPx: Float, zoom: Float): ClosedFloatingPointRange<Flo
 }
 
 /**
+ * Where the page's LEFT edge sits inside its slot, in slot pixels.
+ *
+ * The slot is never wider than the viewport (layout clamps it), but a zoomed page is. The page
+ * is centred on the slot and then shifted by [panX], so
+ * `left = (slotWidth - pageWidth) / 2 + panX`. At zoom 1 this is just [panX]; zoomed in it is
+ * negative. The pdf<->screen transform wants exactly this value as its pan, and it was being
+ * handed the raw [panX], which put every tap and every highlight off by half the overflow
+ * as soon as the page was zoomed.
+ */
+fun pageLeftInSlotPx(slotWidthPx: Int, pageWidthPx: Int, panX: Float): Float =
+    if (slotWidthPx <= 0 || pageWidthPx <= 0) panX else (slotWidthPx - pageWidthPx) / 2f + panX
+
+/**
  * The horizontal pan, clamped to the content bounds.
  *
  * A zoomed page is wider than the viewport, so it can be panned sideways -

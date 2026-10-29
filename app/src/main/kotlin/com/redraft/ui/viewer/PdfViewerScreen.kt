@@ -192,7 +192,6 @@ fun PdfViewerScreen(
                         viewportWidthPx = viewportWidthPx,
                         handle = handle,
                         cache = cache,
-                        visiblePageIndex = uiState.visiblePageIndex,
                         selectionState = selectionState,
                         onTap = { tapScreen, pageIdx, viewport, transform ->
                             viewModel.onTap(tapScreen, pageIdx, viewport, transform)
@@ -412,8 +411,7 @@ private fun PdfPageItem(
     viewportWidthPx: Int,
     handle: DocumentHandle?,
     cache: PageBitmapCache,
-    visiblePageIndex: Int,
-    selectionState: com.redraft.ui.viewer.SelectionOverlayState?,
+    selectionState: SelectionOverlayState?,
     onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -608,18 +606,27 @@ private fun PdfPageItem(
                                         return@awaitEachGesture
                                     }
                                 }
-                                onTap(PdfPoint(down.position.x, down.position.y), pageIndex,
-                                    ViewportState(zoom, panX, 0f), currentTransform)
+                                // Read the viewport at tap time. The pointer block
+                                // is keyed on pageIndex, which never changes, so
+                                // anything it captured instead would be frozen at
+                                // first composition and every tap after a pinch
+                                // would be converted with the old zoom.
+                                onTap(
+                                    PdfPoint(down.position.x, down.position.y),
+                                    pageIndex,
+                                    latestViewport.value,
+                                    latestTransform.value,
+                                )
                             }
                         },
                 ) {
                     // Draw the selection caret if this page is selected
                     SelectionOverlay(
                         pageIndex = pageIndex,
-                        state = selectionState?.copy(pageIndex = pageIndex) ?: SelectionOverlayState(),
+                        state = selectionState,
                         viewport = latestViewport.value,
                         transform = latestTransform.value,
-                )
+                    )
                 }
             }
         }
