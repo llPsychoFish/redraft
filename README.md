@@ -4,12 +4,11 @@ An Android PDF editor that performs **true content editing** — changing existi
 images inside a PDF — rather than just annotating it. Pages are rendered through PDFium
 (via NDK/JNI) and edited at the page-object level, regenerating the content stream on save.
 
-> **Status: v0.1.2 — viewer only.** Redraft opens, renders, zooms, pans and navigates
+> **Status: v0.1.3 — viewer + Phase 2.** Redraft opens, renders, zooms, pans and navigates
 > documents, with a branded theme, a working Settings screen, and honest About/Support pages.
-> The editing features — selecting an object, changing its text, moving an image, writing the
-> file back — are Phases 2 through 5 and are **not implemented yet**. The About screen says
-> this in the app too: *"Viewer today; true content editing is in development."* See
-> [Roadmap](#roadmap).
+> Phase 2 (selection & hit-testing) is now implemented — taps reliably select the object you meant,
+> selection overlays draw only on the owning page, and zoomed taps work correctly. Phases 3-5
+> (text editing, image editing, save) remain planned.
 
 ---
 
@@ -210,7 +209,7 @@ page".)
 | 1 | Foundation & Viewer | **Done** — 14/14 plans, UAT 19/19, verification passed |
 | 01.1 | UI, Settings & Release Prep | **Done** — v0.1.0: brand theme, Settings, About/Support, adaptive icon, signed-release configuration |
 | **01.2** | **Polish & Performance** | **Done** — v0.1.2: navigation transition fix, dark mode contrast, Inter font bundled |
-| 2 | Selection & Hit-Testing | Next — a tap reliably selects the object you meant |
+| 2 | Selection & Hit-Testing | **Done** — taps reliably select the object you meant; selection overlays draw only on the owning page; zoomed taps work correctly with `pageLeftInSlotPx` correction |
 | 3 | Text Editing MVP | Planned — inline editing of a selected text object |
 | 4 | Image & Object Editing | Planned — select, move, resize, delete, replace |
 | 5 | Save & Hardening | Planned — write the edited document back out |
@@ -224,6 +223,7 @@ The full plan, requirement and decision history lives in `.planning/`.
 - **Navigation transitions**: Fixed back-gesture glitch where screens overlapped and jumped. `popExitTransition` now slides out to the right (mirroring `popEnter`), and all transition durations reduced from 300 ms → 250 ms to minimize overlap while the heavy viewer screen composes.
 - **Dark/AMOLED contrast**: About screen body text uses `onSurface` (full opacity), feature chips use `primaryContainer`/`onPrimaryContainer` (amber on dark), and the Support button uses `primary`/`onPrimary` — all readable in Light, Dark, and AMOLED themes.
 - **Typography**: Genuine Inter TTF fonts (Regular, Medium, SemiBold, Bold) bundled via `res/font/` and wired into `RedraftTypography`.
+- **Phase 2 selection & hit-testing**: Taps reliably select the intended object; selection overlays now draw only on the page that owns the selection; zoomed taps work correctly with `pageLeftInSlotPx` correction for the page's real left edge.
 
 ---
 
