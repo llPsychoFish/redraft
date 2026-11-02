@@ -56,6 +56,7 @@ import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.ViewportState
+import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
@@ -141,6 +142,15 @@ fun PdfViewerScreen(
         // they must not capture this value (01.1-REVIEW W-01).
         val currentViewportWidthPx = rememberUpdatedState(viewportWidthPx)
 
+        // How far a tap may miss a line's box and still select it. The reader's finger
+        // is a constant PHYSICAL size, and neither the ViewModel nor pdfcore has a
+        // display density, so dp becomes pixels exactly here.
+        val tapTolerance = remember(density) {
+            with(density) {
+                TapTolerance(horizontalPx = 8.dp.toPx(), minLineHeightPx = 32.dp.toPx())
+            }
+        }
+
         if (uiState.pageCount == 0) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -193,8 +203,9 @@ fun PdfViewerScreen(
                         handle = handle,
                         cache = cache,
                         selectionState = selectionState,
-                        onTap = { tapScreen, pageIdx, viewport, transform ->
-                            viewModel.onTap(tapScreen, pageIdx, viewport, transform)
+                        tapTolerance = tapTolerance,
+                        onTap = { tapScreen, pageIdx, viewport, transform, tolerance ->
+                            viewModel.onTap(tapScreen, pageIdx, viewport, transform, tolerance)
                         },
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
@@ -412,7 +423,8 @@ private fun PdfPageItem(
     handle: DocumentHandle?,
     cache: PageBitmapCache,
     selectionState: SelectionOverlayState?,
-    onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform) -> Unit,
+    tapTolerance: TapTolerance,
+    onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform, TapTolerance) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Where the LIVE zoom would render.
@@ -489,12 +501,12 @@ private fun PdfPageItem(
         transform?.renderedSize(zoom)
     }
 
-    // Page's real left edge: the offset from the slot origin to the page's
-    // actual rendered content. At fit width this is 0; when zoomed the page
-    // is centred, so the left edge is negative.
-    val displayWidthPx: Float = display?.widthPx?.toFloat() ?: 0f
-    val slotWidthPx = viewportWidthPx.toFloat().coerceIn(0f, displayWidthPx)
-    val pageLeftPx = (slotWidthPx - displayWidthPx) / 2f + panX
+    // The page's real left edge - what the transform wants as its pan, and what the
+    // overlay draws by. The list centres the item, so the edge is negative zoomed in
+    // and positive zoomed below fit width. Clamping the slot to the page width, as
+    // the inlined version did, reported `panX` in the second case and put every tap
+    // and highlight half the page/viewport gap away from its glyph.
+    val pageLeftPx = pageLeftInSlotPx(viewportWidthPx, display?.widthPx ?: 0, panX)
 
     // Re-render only when the pinch has settled (D-09): renderTick increments
     // 250 ms after the zoom stops moving. The bucket is read at that moment, so
@@ -588,6 +600,7 @@ private fun PdfPageItem(
             if (currentTransform != null) {
                 val latestTransform = rememberUpdatedState(currentTransform)
                 val latestViewport = rememberUpdatedState(ViewportState(zoom, pageLeftPx, 0f))
+                val latestTolerance = rememberUpdatedState(tapTolerance)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -616,6 +629,7 @@ private fun PdfPageItem(
                                     pageIndex,
                                     latestViewport.value,
                                     latestTransform.value,
+                                    latestTolerance.value,
                                 )
                             }
                         },

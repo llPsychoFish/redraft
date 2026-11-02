@@ -10,6 +10,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.redraft.data.DocumentError
 import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfViewportTransform
+import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.pdfcore.selection.hitTest
 import com.redraft.pdfcore.selection.pageTextLayout
 import com.redraft.data.DocumentHandle
@@ -204,9 +205,6 @@ class PdfViewerViewModel(
     private var lastMessagePageIndex: Int? = null
     private var lastVisiblePageIndex: Int? = null
 
-    /** Dropped taps awaiting extraction completion (B6, B8). */
-    private val droppedTaps = mutableMapOf<Int, PdfPoint>()
-
     /** Flag: set when edit mode is turned on, so onVisiblePagesChanged can
      *  start extraction for initially-visible pages. */
     private var editModeJustStarted = false
@@ -238,12 +236,16 @@ class PdfViewerViewModel(
      * @param pageIndex the page that was tapped.
      * @param viewport current zoom and pan state.
      * @param transform screen↔PDF coordinate transform (D-02, D-14).
+     * @param tolerance how far from a line a tap still counts as on it, in SCREEN
+     *   pixels — the caller converts dp (`8.dp.toPx()`), because a ViewModel has no
+     *   display density and this module must stay density-free.
      */
     fun onTap(
         tapScreen: PdfPoint,
         pageIndex: Int,
         viewport: ViewportState,
         transform: PdfViewportTransform,
+        tolerance: TapTolerance,
     ) {
         if (!_editMode.value) {
             // Log.d(TAG, "Tap ignored: in read mode")
@@ -259,7 +261,7 @@ class PdfViewerViewModel(
                     // A miss on a page that HAS text merely clears the
                     // selection — no message (D-30).
                     val result = withContext(computeDispatcher) {
-                        com.redraft.pdfcore.selection.hitTest(tapScreen, state.layout, viewport, transform)
+                        hitTest(tapScreen, state.layout, viewport, transform, tolerance)
                     }
                     _selectionState.value = result?.let {
                         selectionPageIndex = pageIndex
@@ -441,7 +443,6 @@ class PdfViewerViewModel(
             extractionJobs.clear()
             pageTextStates.clear()
             textLayoutCache.clear()
-            droppedTaps.clear()
             editModeJustStarted = false
         } else {
             editModeJustStarted = true

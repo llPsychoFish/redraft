@@ -24,15 +24,35 @@ data class HitResult(
 )
 
 /**
+ * How far a tap may sit from a line's box and still select it, in SCREEN PIXELS.
+ *
+ * Pixels, never dp: this module has no display density, and a tap tolerance has to
+ * be a constant *physical* size, so the caller converts `8.dp.toPx()` where a
+ * `Density` is in scope. Handing dp to [hitTest] silently shrinks the tolerance to
+ * a fraction of its intent on a high-density phone.
+ *
+ * [minLineHeightPx] only matters for a line with no neighbour to bound against —
+ * everywhere else the band is cut at the midpoint between two lines, which is the
+ * tighter and correct bound.
+ */
+data class TapTolerance(
+    val horizontalPx: Float,
+    val minLineHeightPx: Float,
+)
+
+/**
  * Screen tap → [HitResult] using the rules of D-06, D-07, D-08, D-09.
  *
  * - Coordinate conversion: screen (y-down) → PDF user space (y-up) via
  *   [PdfViewportTransform.screenToPdf] (D-02).
- * - Hit area: union of glyph boxes + 8 dp / 32 dp screen-pixel padding (D-08).
- * - Split at midpoint of adjacent baselines (D-08): implemented by expanding
- *   each line's hit area to exactly half the distance to the next line.
- * - Nearest-centre tiebreak: when a tap lands in the overlap of two hit areas
- *   the line whose centre is closest to the tap wins (D-09).
+ * - Hit area (D-08): the line's glyph union widened by [TapTolerance.horizontalPx]
+ *   at each end, and vertically bounded by the midpoint to the nearest line that
+ *   OVERLAPS it in x — so bands tile the page and never reach past halfway into
+ *   a neighbour.
+ * - Choice (D-09): among the lines whose band contains the tap, the one whose
+ *   own box is nearest wins. Distance is measured to the line's RECT, never to
+ *   its centre — a centre is meaningless between a 5 pt list marker and the
+ *   450 pt line it sits in front of.
  * - Block grouping is NEVER consulted by this function (D-07).
  *
  * Returns `null` when the tap misses all hit areas.
@@ -42,8 +62,7 @@ fun hitTest(
     layout: TextPageLayout,
     viewport: ViewportState,
     transform: PdfViewportTransform,
-    paddingHorizPx: Float = 8f,
-    minHeightPx: Float = 32f,
+    tolerance: TapTolerance,
 ): HitResult? {
     val tapPdf = transform.screenToPdf(
         ScreenPoint(tapScreen.x, tapScreen.y),
@@ -54,53 +73,80 @@ fun hitTest(
     if (lines.isEmpty()) return null
 
     val pppx = transform.pdfUnitsPerPixel(viewport.zoom)
+    val padX = tolerance.horizontalPx * pppx
+    val maxPadY = (tolerance.minLineHeightPx * pppx) * 0.5f
 
-    // Build expanded hit areas for each line.
-    // For each line i, the hit area top boundary is the midpoint between
-    // line i's rect.maxY and line (i-1)'s rect.minY.
-    // Similarly for bottom boundary vs. line (i+1).
-    // Where no neighbour exists, use a fixed padding of minHeightPx / 2.
-    val halfMinHeight = (minHeightPx * pppx) * 0.5f
+    // Index sorted by vertical centre, bottom-most first (PDF y is up).
+    val byY = lines.indices.sortedBy {
+        val r = lines[it].rect
+        (r.minY + r.maxY) * 0.5f
+    }
+    val positionInY = IntArray(lines.size)
+    byY.forEachIndexed { slot, lineIdx -> positionInY[lineIdx] = slot }
 
-    data class LineHitArea(val line: TextLine, val expanded: PdfRect)
+    data class Band(val line: TextLine, val minY: Float, val maxY: Float)
 
-    val hitAreas = List(lines.size) { i ->
+    // For each line, the nearest overlapping line above and below. Two lines
+    // overlap only if their x ranges meet, so a two-column page bounds each
+    // column against itself and a tap never crosses the gutter.
+    val bands = Array(lines.size) { i ->
         val r = lines[i].rect
-        val padX = paddingHorizPx * pppx
-        // Vertical midpoint between line i-1 and line i
-        val topPad = if (i > 0) {
-            val prevBottom = lines[i - 1].rect.maxY
-            maxOf((r.minY - prevBottom) * 0.5f, halfMinHeight)
-        } else halfMinHeight
-        // Vertical midpoint between line i and line i+1
-        val bottomPad = if (i < lines.lastIndex) {
-            val nextTop = lines[i + 1].rect.minY
-            maxOf((nextTop - r.maxY) * 0.5f, halfMinHeight)
-        } else halfMinHeight
+        val centreY = (r.minY + r.maxY) * 0.5f
+        val me = positionInY[i]
 
-        val expanded = PdfRect(
-            minX = r.minX - padX,
-            minY = r.minY - topPad,
-            maxX = r.maxX + padX,
-            maxY = r.maxY + bottomPad,
-        )
-        LineHitArea(lines[i], expanded)
+        var topPad = maxPadY
+        var slot = me + 1
+        while (slot < byY.size) {
+            val other = lines[byY[slot]].rect
+            val gap = other.minY - r.maxY
+            if (gap > maxPadY * 2f) break
+            if (rectsOverlapInX(r, other)) {
+                topPad = ((if (gap > 0f) (r.maxY + other.minY) * 0.5f else centreY) - r.maxY)
+                    .coerceIn(0f, maxPadY)
+                break
+            }
+            slot++
+        }
+
+        var bottomPad = maxPadY
+        slot = me - 1
+        while (slot >= 0) {
+            val other = lines[byY[slot]].rect
+            val gap = r.minY - other.maxY
+            if (gap > maxPadY * 2f) break
+            if (rectsOverlapInX(r, other)) {
+                bottomPad = (r.minY - (if (gap > 0f) (r.minY + other.maxY) * 0.5f else centreY))
+                    .coerceIn(0f, maxPadY)
+                break
+            }
+            slot--
+        }
+
+        Band(lines[i], r.minY - bottomPad, r.maxY + topPad)
     }
 
-    // Pick nearest-centre line whose hit area contains the tap (D-09).
-    var best: LineHitArea? = null
-    var bestDistSq = Float.MAX_VALUE
+    // Among the bands the tap falls in, take the line whose box is nearest.
+    var best: Band? = null
+    var bestDx = Float.MAX_VALUE
+    var bestWidth = -Float.MAX_VALUE
 
-    for (ha in hitAreas) {
-        if (ha.expanded.contains(tapPdf.x, tapPdf.y)) {
-            val cx = (ha.line.rect.minX + ha.line.rect.maxX) * 0.5f
-            val cy = (ha.line.rect.minY + ha.line.rect.maxY) * 0.5f
-            val dx = tapPdf.x - cx
-            val dy = tapPdf.y - cy
-            val distSq = dx * dx + dy * dy
-            if (distSq < bestDistSq) {
-                bestDistSq = distSq
-                best = ha
+    for (band in bands) {
+        if (tapPdf.y < band.minY || tapPdf.y > band.maxY) continue
+        val r = band.line.rect
+        val dx = when {
+            tapPdf.x < r.minX -> r.minX - tapPdf.x
+            tapPdf.x > r.maxX -> tapPdf.x - r.maxX
+            else -> 0f
+        }
+        // A tap equidistant from a short marker and the long line beside it is
+        // meant for the line, so width breaks the tie.
+        if (dx < bestDx || (dx == bestDx && r.width > bestWidth)) {
+            // The horizontal tolerance still gates the tap: outside every box by
+            // more than padX there is nothing to select.
+            if (dx <= padX) {
+                bestDx = dx
+                bestWidth = r.width
+                best = band
             }
         }
     }
@@ -124,3 +170,6 @@ fun hitTest(
         caretEndPdf = caretEnd,
     )
 }
+
+private fun rectsOverlapInX(a: PdfRect, b: PdfRect): Boolean =
+    a.minX <= b.maxX && b.minX <= a.maxX
