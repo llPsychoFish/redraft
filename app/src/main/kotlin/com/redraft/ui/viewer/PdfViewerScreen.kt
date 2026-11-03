@@ -48,7 +48,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
@@ -62,7 +61,6 @@ import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.viewer.SelectionOverlay
 import com.redraft.ui.viewer.SelectionOverlayState
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -438,7 +436,11 @@ private fun PdfPageItem(
         val cached = cache.acquire(PageKey(pageIndex, liveBucket))
         mutableStateOf(cached?.let { RenderedPage(it, liveBucket) })
     }
-    var pageSize by remember(pageIndex) { mutableStateOf<PdfPageGeometry?>(null) }
+    // Keyed on the HANDLE as well as the page (02-REVIEW CR-02). A Lazy item
+    // survives a document swap, so keying on the page alone kept the PREVIOUS
+    // document's geometry - size, rotation and CropBox - for every tap,
+    // overlay quad and render dimension drawn on the reused slot.
+    var pageSize by remember(pageIndex, handle) { mutableStateOf<PdfPageGeometry?>(null) }
     var renderTick by remember { mutableIntStateOf(0) }
 
     // The bucket the bitmap on screen was actually rendered at. This is NOT the
@@ -463,13 +465,13 @@ private fun PdfPageItem(
         onDispose { if (drawn != null) cache.releaseDisplay(drawn) }
     }
 
-    // Load the page's intrinsic size/rotation once.
+    // Load the page's intrinsic size/rotation for THIS handle. The effect is
+    // keyed on the handle too, and does not skip a refetch: after a document
+    // swap the slot must be re-measured, not keep the stale geometry (CR-02).
     LaunchedEffect(handle, pageIndex) {
         val current = handle ?: return@LaunchedEffect
-        if (pageSize == null) {
-            pageSize = withContext(Dispatchers.IO) {
-                current.pageSize(pageIndex)
-            }
+        pageSize = withContext(Dispatchers.IO) {
+            current.pageSize(pageIndex)
         }
     }
 
@@ -607,17 +609,40 @@ private fun PdfPageItem(
                         .pointerInput(pageIndex) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = true)
-                                // Detect tap: only fire onTap if finger lifts without
-                                // moving beyond touch slop.
-                                val up = awaitPointerEvent().changes.firstOrNull { it.pressed }
-                                if (up != null) {
-                                    val dx = Math.abs(up.position.x - down.position.x)
-                                    val dy = Math.abs(up.position.y - down.position.y)
-                                    val distance = dx + dy
-                                    if (distance > viewConfiguration.touchSlop) {
-                                        // Significant movement: not a tap, skip
-                                        return@awaitEachGesture
+                                // A tap is a SHORT, single-pointer press that
+                                // LIFTS without another gesture claiming it.
+                                // Firing on the frame after pointer-down made
+                                // every scroll start, long press and pinch
+                                // dispatch a "tap" from its start position - a
+                                // line near the finger got selected and
+                                // whitespace boxes appeared (02-REVIEW CR-01).
+                                var sawSecondPointer = false
+                                var wasConsumed = false
+                                var upTime = down.uptimeMillis
+                                var upPosition = down.position
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.size > 1) sawSecondPointer = true
+                                    // A scroll or pan CLAIMS the change; that,
+                                    // not the distance travelled, is what tells
+                                    // a tap from a drag.
+                                    if (event.changes.any { it.isConsumed }) wasConsumed = true
+                                    if (event.changes.none { it.pressed }) {
+                                        upTime = event.changes.maxOf { it.uptimeMillis }
+                                        upPosition = event.changes.first().position
+                                        break
                                     }
+                                }
+                                if (sawSecondPointer || wasConsumed) return@awaitEachGesture
+                                if (upTime - down.uptimeMillis >
+                                    viewConfiguration.longPressTimeoutMillis
+                                ) {
+                                    return@awaitEachGesture
+                                }
+                                if ((upPosition - down.position).getDistance() >
+                                    viewConfiguration.touchSlop
+                                ) {
+                                    return@awaitEachGesture
                                 }
                                 // Read the viewport at tap time. The pointer block
                                 // is keyed on pageIndex, which never changes, so
