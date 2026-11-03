@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 02
-status: completed
-stopped_at: Phase 02 execution resumed after interrupted session — Plan 02-02 partial (Task 6 generator + fixtures committed c41ea54; Tasks 1-5 and test files outstanding; SUMMARY.md missing). Executing wave 2.
-last_updated: "2026-10-28T00:32:28.978Z"
-last_activity: 2026-10-28
-last_activity_desc: Phase 02 marked complete
+status: in_progress
+stopped_at: Phase 02 plan 03 complete — verification gaps outside its scope remain (CR-05 overview dp sizing, drift-session fixes 1-5, TextExtractionTest.kt, on-device UAT)
+last_updated: "2026-11-03T15:20:00.000Z"
+last_activity: 2026-11-03
+last_activity_desc: Phase 02 plan 03 (gap closure) executed
 progress:
-  total_phases: 3
-  completed_phases: 3
-  total_plans: 24
-  completed_plans: 24
+  total_phases: 6
+  completed_phases: 2
+  total_plans: 25
+  completed_plans: 25
 current_phase_name: Selection & Hit-Testing
-state_head: c41ea54
+state_head: 6ebf772
 ---
 
 # Project State
@@ -28,12 +28,12 @@ See: .planning/PROJECT.md (updated 2026-10-16)
 
 ## Current Position
 
-Phase: 02 — COMPLETE
-Plan: 1 of 2
-Status: Phase 02 complete
-Last activity: 2026-10-28 — Phase 02 marked complete
+Phase: 02 — selection & hit-testing (plans executed, verification gaps remain)
+Plan: 3 of 3
+Status: Plan 02-03 (gap closure) complete; remaining gaps belong to verification, not to a plan
+Last activity: 2026-11-03 — plan 02-03 gap closure executed
 
-Progress: [██████████] 95% - Phase 1 complete (6 phases in the milestone, 1 done)
+Progress: [████████░░] 83% - Phases 1 and 01.1 complete; Phase 2 plans done, verification open (6 phases in the milestone, 2 done)
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Progress: [██████████] 95% - Phase 1 complete (6 phases in t
 |-------|-------|-------|----------|
 | 01 | 14 | - | - |
 | 01.1 | 8 | - | - |
+| 02 | 3 | - | - |
 
 **Recent Trend:**
 
@@ -80,6 +81,8 @@ Recent decisions affecting current work:
 - 2026-10-17: Navigation uses a replay=0 SharedFlow event rather than state-derived navigation, so returning to Home does not re-navigate to the viewer
 - 2026-10-17: PdfViewportTransform is pure/`android.graphics`-free in pdfcore so Phase 2 hit-testing reuses it verbatim; page layout is driven by `renderedSize` (rotation-aware)
 - 2026-10-17: Zoom clamped to [1f, 5f] and quantized to Z_00_SCALE_BUCKETS; pinch live-scales the cached bitmap and re-renders only after a 250 ms settle
+- 2026-11-03: A selection tap is detected on finger LIFT (unconsumed, single pointer, under the long-press timeout, within touch slop) rather than on pointer-down; the page slot's geometry is remembered with the document handle key and refetched on handle change
+- 2026-11-03: Only extraction and `groupBlocks` leave Main in the ViewModel — the layout LRU, per-page states and job map are Main-confined, and extraction is never started from Read mode
 
 ### Pending Todos
 
@@ -121,6 +124,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-10-26T00:01:04.419Z
-Stopped at: Phase 2 context gathered
-Resume file: .planning/phases/02-selection-hit-testing/02-CONTEXT.md
+Last session: 2026-11-03T15:20:00.000Z
+Stopped at: Phase 02 plan 03 complete — the remaining Phase 2 work is verification debt, not an unexecuted plan
+Resume file: .planning/phases/02-selection-hit-testing/02-03-SUMMARY.md
