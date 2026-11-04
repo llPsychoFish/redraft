@@ -649,8 +649,11 @@ private fun PdfPageItem(
                                 // anything it captured instead would be frozen at
                                 // first composition and every tap after a pinch
                                 // would be converted with the old zoom.
+                                // CR-01: use lift position (upPosition) rather than
+                                // down position for tap detection — this resolves the
+                                // "tap selects nothing / adjacent line" on-device defect.
                                 onTap(
-                                    PdfPoint(down.position.x, down.position.y),
+                                    PdfPoint(upPosition.x, upPosition.y),
                                     pageIndex,
                                     latestViewport.value,
                                     latestTransform.value,
