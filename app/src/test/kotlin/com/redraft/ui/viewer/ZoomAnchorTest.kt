@@ -234,4 +234,21 @@ class ZoomAnchorTest {
         assertFalse(panWouldMove(-120f, 1000f, 1f))
         assertTrue(panWouldMove(0f, 1000f, 1f))
     }
+
+    @Test
+    fun `the page left edge is centred in the viewport at every zoom`() {
+        // fit width: the page and the slot agree, so the edge is the pan.
+        assertEquals(0f, pageLeftInSlotPx(720, 720, 0f), 0.001f)
+        assertEquals(35f, pageLeftInSlotPx(720, 720, 35f), 0.001f)
+        // zoomed in: the page overflows equally on both sides, so the left edge
+        // is negative and the tap must be converted against THAT, not the pan.
+        assertEquals(-144f, pageLeftInSlotPx(720, 1008, 0f), 0.001f)
+        // zoomed below fit width: the page is narrower than the slot and the list
+        // still centres it, so the edge is positive. Clamping the slot to the
+        // page width - what the inlined expression used to do - reported 0 here
+        // and every tap landed left of the glyph it was on.
+        assertEquals(100f, pageLeftInSlotPx(720, 520, 0f), 0.001f)
+        // A page whose size has not loaded yet has no edge to report.
+        assertEquals(12f, pageLeftInSlotPx(720, 0, 12f), 0.001f)
+    }
 }

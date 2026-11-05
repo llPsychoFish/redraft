@@ -23,6 +23,7 @@ class RealPdfiumLineReductionTest {
     private fun text(line: TextLine) = line.chars.joinToString("") { it.text }.trim()
 
     private val viewportWidthPx = 720
+    private val tolerance = TapTolerance(horizontalPx = 8f, minLineHeightPx = 32f)
     private val transform = PdfViewportTransform(
         pageWidthPt = 612f, pageHeightPt = 792f, rotationDegrees = 0,
         renderedWidthPx = viewportWidthPx, renderedHeightPx = (viewportWidthPx * 792f / 612f).toInt(),
@@ -48,7 +49,7 @@ class RealPdfiumLineReductionTest {
             val center = transform.pdfToScreen(
                 PdfPoint((line.rect.minX + line.rect.maxX) / 2f, (line.rect.minY + line.rect.maxY) / 2f), viewport,
             )
-            val hit = hitTest(PdfPoint(center.x, center.y), layout, viewport, transform)
+            val hit = hitTest(PdfPoint(center.x, center.y), layout, viewport, transform, tolerance)
             assertNotNull("tap on [${text(line)}] hit nothing", hit)
             assertEquals(text(line), text(hit!!.line))
         }
@@ -70,9 +71,9 @@ class RealPdfiumLineReductionTest {
         val tap = PdfPoint(onScreenAtZeroLeft.x + pageLeftPx, onScreenAtZeroLeft.y)
 
         // What the app passed before the fix: the raw pan. It misses.
-        assertNull(hitTest(tap, layout, ViewportState(zoom, 0f, 0f), transform))
+        assertNull(hitTest(tap, layout, ViewportState(zoom, 0f, 0f), transform, tolerance))
         // With the page's real left edge it hits the right line.
-        val hit = hitTest(tap, layout, ViewportState(zoom, pageLeftPx, 0f), transform)
+        val hit = hitTest(tap, layout, ViewportState(zoom, pageLeftPx, 0f), transform, tolerance)
         assertNotNull(hit)
         assertTrue(text(hit!!.line).startsWith("android:layout_height"))
     }

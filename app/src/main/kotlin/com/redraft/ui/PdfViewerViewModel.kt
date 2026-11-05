@@ -10,6 +10,9 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.redraft.data.DocumentError
 import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfViewportTransform
+import com.redraft.pdfcore.selection.TapTolerance
+import com.redraft.pdfcore.selection.groupBlocks
+import kotlin.coroutines.coroutineContext
 import com.redraft.pdfcore.selection.hitTest
 import com.redraft.pdfcore.selection.pageTextLayout
 import com.redraft.data.DocumentHandle
@@ -195,6 +198,15 @@ class PdfViewerViewModel(
     private val pageTextStates = mutableMapOf<Int, PageTextState>()
     private val extractionJobs = mutableMapOf<Int, Job>()
 
+    // Block identity per page (D-15 / D-17): firstCharIndex -> blockId, produced by
+    // groupBlocks once per extraction. The reducer's own lines carry a null blockId,
+    // so this map is what gives the selection overlay its paragraph metadata.
+    private val blockIdsByPage = mutableMapOf<Int, Map<Int, String>>()
+
+    // The pages the viewport last reported. Turning Edit mode on starts extraction
+    // for these; Read mode extracts nothing (D-28's lazy-on-first-tap contract).
+    private var visiblePages: Set<Int> = emptySet()
+
     // The page that owns the current selection: its layout survives the
     // viewport eviction (D-28) and the overlay keeps working (D-24).
     private var selectionPageIndex: Int? = null
@@ -203,13 +215,6 @@ class PdfViewerViewModel(
     // cleared when the visible page changes.
     private var lastMessagePageIndex: Int? = null
     private var lastVisiblePageIndex: Int? = null
-
-    /** Dropped taps awaiting extraction completion (B6, B8). */
-    private val droppedTaps = mutableMapOf<Int, PdfPoint>()
-
-    /** Flag: set when edit mode is turned on, so onVisiblePagesChanged can
-     *  start extraction for initially-visible pages. */
-    private var editModeJustStarted = false
 
     /** Number of cached page layouts — exposed for the lifecycle unit tests. */
     internal val cachedLayoutCount: Int get() = textLayoutCache.size
@@ -238,34 +243,46 @@ class PdfViewerViewModel(
      * @param pageIndex the page that was tapped.
      * @param viewport current zoom and pan state.
      * @param transform screen↔PDF coordinate transform (D-02, D-14).
+     * @param tolerance how far from a line a tap still counts as on it, in SCREEN
+     *   pixels — the caller converts dp (`8.dp.toPx()`), because a ViewModel has no
+     *   display density and this module must stay density-free.
      */
     fun onTap(
         tapScreen: PdfPoint,
         pageIndex: Int,
         viewport: ViewportState,
         transform: PdfViewportTransform,
+        tolerance: TapTolerance,
     ) {
         if (!_editMode.value) {
-            // Log.d(TAG, "Tap ignored: in read mode")
             return
         }
 
         viewModelScope.launch {
             val handle = currentHandle ?: return@launch
 
-            // Log.d(TAG, "Starting extraction for page $pageIndex")
             when (val state = awaitPageText(pageIndex, handle)) {
                 is PageTextState.Ready -> {
+                    // Leaving Edit mode while the tap waited for the extraction
+                    // must not write a selection: setEditMode already wiped the
+                    // caches, and Read-mode taps select nothing (D-20, WR-02).
+                    if (!_editMode.value) return@launch
+
                     // A miss on a page that HAS text merely clears the
                     // selection — no message (D-30).
                     val result = withContext(computeDispatcher) {
-                        com.redraft.pdfcore.selection.hitTest(tapScreen, state.layout, viewport, transform)
+                        hitTest(tapScreen, state.layout, viewport, transform, tolerance)
                     }
                     _selectionState.value = result?.let {
                         selectionPageIndex = pageIndex
                         com.redraft.ui.viewer.SelectionOverlayState(
                             selectedLine = it.line,
-                            blockId = it.line.blockId,
+                            // Block identity is metadata for Phase 3 (D-15): the
+                            // reducer never groups, so the line's own blockId is
+                            // null and the id comes from the post-extraction
+                            // grouping keyed by the line's first character.
+                            blockId = it.line.blockId
+                                ?: blockIdsByPage[pageIndex]?.get(it.line.firstCharIndex),
                             editable = it.line.fragment.editable,
                             pageIndex = pageIndex,
                         )
@@ -316,28 +333,58 @@ class PdfViewerViewModel(
      */
     private fun startExtraction(pageIndex: Int, handle: DocumentHandle): Job {
         pageTextStates[pageIndex] = PageTextState.Loading
-        val job = viewModelScope.launch(ioDispatcher) {
-            val result = try {
-                extractPageText(handle, pageIndex)
-            } catch (cancellation: CancellationException) {
-                throw cancellation
-            } catch (_: Throwable) {
-                com.redraft.pdfcore.selection.PageTextLayout.Failed
-            }
-            when (result) {
-                is com.redraft.pdfcore.selection.PageTextLayout.Ready -> {
-                    textLayoutCache[pageIndex] = result.layout
-                    pageTextStates[pageIndex] = PageTextState.Ready(result.layout)
-                    enforceLayoutCacheLimit()
+        val job = viewModelScope.launch {
+            try {
+                val result = try {
+                    // Only the EXTRACTION leaves the Main thread. Every map access
+                    // below stays on Main: the LRU is access-ordered, so a read
+                    // structurally mutates it and cannot race the visibility
+                    // sweep that shares it (02-REVIEW CR-04).
+                    withContext(ioDispatcher) {
+                        extractPageText(handle, pageIndex)
+                    }
+                } catch (cancellation: CancellationException) {
+                    throw cancellation
+                } catch (_: Throwable) {
+                    com.redraft.pdfcore.selection.PageTextLayout.Failed
                 }
+                when (result) {
+                    is com.redraft.pdfcore.selection.PageTextLayout.Ready -> {
+                        val layout = result.layout
+                        val blockIds = withContext(computeDispatcher) {
+                            groupBlocks(layout.reducedLines, pageIndex)
+                                .flatMap { block ->
+                                    block.lines.map { line -> line.firstCharIndex to block.blockId }
+                                }
+                                .toMap()
+                        }
+                        textLayoutCache[pageIndex] = layout
+                        blockIdsByPage[pageIndex] = blockIds
+                        pageTextStates[pageIndex] = PageTextState.Ready(layout)
+                        enforceLayoutCacheLimit()
+                    }
 
-                com.redraft.pdfcore.selection.PageTextLayout.Empty ->
-                    pageTextStates[pageIndex] = PageTextState.Empty
+                    com.redraft.pdfcore.selection.PageTextLayout.Empty ->
+                        pageTextStates[pageIndex] = PageTextState.Empty
 
-                com.redraft.pdfcore.selection.PageTextLayout.Failed ->
-                    pageTextStates[pageIndex] = PageTextState.Failed
+                    com.redraft.pdfcore.selection.PageTextLayout.Failed ->
+                        pageTextStates[pageIndex] = PageTextState.Failed
+                }
+            } finally {
+                // Register and unregister on the SAME side (Main). Removing from
+                // the IO side could run before the registration below and leave a
+                // finished Job in the map for good, so every later tap re-awaited
+                // a dead Job and the page stayed Loading (02-REVIEW WR-07).
+                val self = coroutineContext[Job]
+                if (self != null && extractionJobs[pageIndex] === self) {
+                    extractionJobs.remove(pageIndex)
+                }
+                // A Job that ends without a settled state must not strand the
+                // page in Loading — a future tap would await nothing and drop.
+                if (pageTextStates[pageIndex] == PageTextState.Loading) {
+                    pageTextStates.remove(pageIndex)
+                }
             }
-            extractionJobs.remove(pageIndex)
         }
         extractionJobs[pageIndex] = job
         return job
@@ -353,6 +400,7 @@ class PdfViewerViewModel(
         while (textLayoutCache.size > limit) {
             val oldest = textLayoutCache.keys.firstOrNull { it != protectedPage } ?: break
             textLayoutCache.remove(oldest)
+            blockIdsByPage.remove(oldest)
         }
     }
 
@@ -386,17 +434,16 @@ class PdfViewerViewModel(
      * the next visit to a page may show its message again (D-31).
      */
     fun onVisiblePagesChanged(visible: Set<Int>) {
+        visiblePages = visible
         val visiblePage = visible.minOrNull() ?: uiState.value.visiblePageIndex
         if (visiblePage != lastVisiblePageIndex) {
             lastVisiblePageIndex = visiblePage
             lastMessagePageIndex = null
-            // Log.d(TAG, "onVisiblePagesChanged: visiblePage=$visiblePage")
         }
 
         // Cancel the extraction of every page that left the screen.
         val gone = extractionJobs.keys - visible
         for (page in gone) {
-            // Log.d(TAG, "Cancelling extraction for page $page")
             extractionJobs.remove(page)?.cancel()
             pageTextStates.remove(page)
         }
@@ -407,26 +454,13 @@ class PdfViewerViewModel(
         val evict = textLayoutCache.keys - visible - setOfNotNull(keep)
         for (page in evict) {
             textLayoutCache.remove(page)
+            blockIdsByPage.remove(page)
             pageTextStates.remove(page)
         }
 
-        // When edit mode is on, start extraction for pages that are visible.
-        val alreadyKnown = textLayoutCache.keys + extractionJobs.keys + pageTextStates.keys
-        val toExtract = visible - alreadyKnown
-        for (page in toExtract) {
-            startExtraction(page, currentHandle!!)
-        }
-
-        // If edit mode just started, also start extraction for all currently
-        // visible pages (they may not have triggered onVisiblePagesChanged
-        // with the new edit-mode flag yet).
-        if (editModeJustStarted) {
-            editModeJustStarted = false
-            for (page in visible - alreadyKnown) {
-                startExtraction(page, currentHandle!!)
-            }
-        }
-
+        // Visibility only CANCELS. Extraction is triggered lazily by a tap in
+        // Edit mode (D-28), or by turning Edit mode on for the visible pages,
+        // never by scrolling in Read mode (02-REVIEW CR-03).
         enforceLayoutCacheLimit()
     }
 
@@ -441,10 +475,16 @@ class PdfViewerViewModel(
             extractionJobs.clear()
             pageTextStates.clear()
             textLayoutCache.clear()
-            droppedTaps.clear()
-            editModeJustStarted = false
+            blockIdsByPage.clear()
         } else {
-            editModeJustStarted = true
+            // Turning Edit mode on warms the pages already on screen; no
+            // extraction starts in Read mode at all (CR-03).
+            currentHandle?.let { handle ->
+                val alreadyKnown = textLayoutCache.keys + extractionJobs.keys + pageTextStates.keys
+                for (page in visiblePages - alreadyKnown) {
+                    startExtraction(page, handle)
+                }
+            }
         }
     }
 
@@ -588,6 +628,8 @@ class PdfViewerViewModel(
         selectionPageIndex = null
         textLayoutCache.clear()
         pageTextStates.clear()
+        blockIdsByPage.clear()
+        visiblePages = emptySet()
         extractionJobs.values.forEach { it.cancel() }
         extractionJobs.clear()
         lastMessagePageIndex = null

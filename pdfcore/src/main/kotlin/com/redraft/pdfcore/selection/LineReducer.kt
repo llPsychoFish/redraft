@@ -120,11 +120,17 @@ fun fragmentChars(chars: List<CharBox>): List<TextFragment> {
 
     for (char in chars) {
         if (current.isNotEmpty() && !isGapOnlyChar(char)) {
-            val prev = current.last()
-            val prevStyle = deriveStyle(listOf(prev))
-            val nextStyle = deriveStyle(listOf(char))
-            if (styleDiffers(prevStyle, nextStyle)) {
-                emitFragment()
+            // Compare against the last GLYPH, not the last char. PDFium synthesises the
+            // space between two text-showing operations at 1 pt regardless of the run's
+            // size, so a space-then-glyph pair would read as a size change and shatter
+            // every justified, multi-run line into one fragment per word.
+            val prev = current.lastOrNull { !isGapOnlyChar(it) }
+            if (prev != null) {
+                val prevStyle = deriveStyle(listOf(prev))
+                val nextStyle = deriveStyle(listOf(char))
+                if (styleDiffers(prevStyle, nextStyle)) {
+                    emitFragment()
+                }
             }
         }
         current.add(char)

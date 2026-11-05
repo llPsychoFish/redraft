@@ -110,6 +110,25 @@ class ThemeSchemeTest {
     }
 
     @Test
+    fun `palette overlay unavailable keeps brand scheme and amoled contract`() {
+        // Issue #6: a ROM with no Material You palette overlay reports dynamic colour as
+        // unavailable, so the brand scheme takes over — and the AMOLED override, which is skipped
+        // whenever a dynamic scheme wins, has to come back into play.
+        val resolved = resolveColorScheme(
+            themeMode = ThemeMode.SYSTEM,
+            dynamicColor = true,
+            amoled = true,
+            darkTheme = true,
+            dynamicAvailable = false,
+            lightScheme = lightScheme,
+            darkScheme = darkScheme,
+            dynamicLight = lightScheme,
+            dynamicDark = darkScheme,
+        )
+        assertEquals(amoledColorScheme, resolved)
+    }
+
+    @Test
     fun `amoled true with dark static scheme applies amoled overrides`() {
         val resolved = resolveColorScheme(
             themeMode = ThemeMode.DARK,

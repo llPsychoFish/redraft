@@ -3,8 +3,10 @@ package com.redraft.ui.theme
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.res.Resources
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
@@ -66,6 +68,26 @@ fun resolveColorScheme(
     }
 }
 
+/**
+ * The system's dynamic light/dark schemes, or null when they cannot be read.
+ *
+ * material3 resolves every `android.R.color.system_accent1_*`/`system_neutral*_*` entry with
+ * `Resources.getColor(id, theme)` and no fallback, so a ROM that ships API 31 but not the Material
+ * You palette overlay makes the lookup throw [Resources.NotFoundException]. One UI is the case
+ * behind issue #6. RedraftTheme wraps the whole UI, so the throw escapes the first composition and
+ * kills the process before a frame is drawn — the app "crashes when trying to open", and no setting
+ * could save it, because both schemes used to be read before the flag was even consulted.
+ */
+fun dynamicColorSchemesOrUnavailable(
+    light: () -> ColorScheme,
+    dark: () -> ColorScheme,
+): Pair<ColorScheme, ColorScheme>? =
+    try {
+        light() to dark()
+    } catch (_: Resources.NotFoundException) {
+        null
+    }
+
 /** Safely finds an Activity in the context hierarchy, returns null if not found (e.g., previews, tests). */
 fun findActivity(context: Context): Activity? {
     var current: Context = context
@@ -91,24 +113,29 @@ fun RedraftTheme(
 
     val dynamicAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
-    // Dynamic color schemes are stable and don't require remember; call directly on API 31+
-    val dynamicLight = if (dynamicAvailable) dynamicLightColorScheme(LocalContext.current) else lightColorScheme
-    val dynamicDark = if (dynamicAvailable) dynamicDarkColorScheme(LocalContext.current) else darkColorScheme
+    // Read the palette only when dynamic colour is asked for, and treat an unreadable palette as
+    // "not available" so the brand schemes — and the AMOLED contract that depends on them — take over
+    val context = LocalContext.current
+    val dynamicSchemes = if (dynamicColor && dynamicAvailable) {
+        dynamicColorSchemesOrUnavailable(
+            light = { dynamicLightColorScheme(context) },
+            dark = { dynamicDarkColorScheme(context) },
+        )
+    } else null
 
     val colorScheme = resolveColorScheme(
         themeMode = themeMode,
         dynamicColor = dynamicColor,
         amoled = amoled,
         darkTheme = darkTheme,
-        dynamicAvailable = dynamicAvailable,
+        dynamicAvailable = dynamicSchemes != null,
         lightScheme = lightColorScheme,
         darkScheme = darkColorScheme,
-        dynamicLight = dynamicLight,
-        dynamicDark = dynamicDark,
+        dynamicLight = dynamicSchemes?.first ?: lightColorScheme,
+        dynamicDark = dynamicSchemes?.second ?: darkColorScheme,
     )
 
     // System bars handling (D-08) — on every scheme change
-    val context = LocalContext.current
     val activity = findActivity(context)
     val insetsController = remember(activity) {
         activity?.let { WindowCompat.getInsetsController(it.window, it.window.decorView) }

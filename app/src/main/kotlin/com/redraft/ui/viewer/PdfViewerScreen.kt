@@ -48,7 +48,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
@@ -56,12 +55,12 @@ import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.ViewportState
+import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.viewer.SelectionOverlay
 import com.redraft.ui.viewer.SelectionOverlayState
-import kotlin.math.abs
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -141,6 +140,15 @@ fun PdfViewerScreen(
         // they must not capture this value (01.1-REVIEW W-01).
         val currentViewportWidthPx = rememberUpdatedState(viewportWidthPx)
 
+        // How far a tap may miss a line's box and still select it. The reader's finger
+        // is a constant PHYSICAL size, and neither the ViewModel nor pdfcore has a
+        // display density, so dp becomes pixels exactly here.
+        val tapTolerance = remember(density) {
+            with(density) {
+                TapTolerance(horizontalPx = 8.dp.toPx(), minLineHeightPx = 32.dp.toPx())
+            }
+        }
+
         if (uiState.pageCount == 0) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -193,8 +201,9 @@ fun PdfViewerScreen(
                         handle = handle,
                         cache = cache,
                         selectionState = selectionState,
-                        onTap = { tapScreen, pageIdx, viewport, transform ->
-                            viewModel.onTap(tapScreen, pageIdx, viewport, transform)
+                        tapTolerance = tapTolerance,
+                        onTap = { tapScreen, pageIdx, viewport, transform, tolerance ->
+                            viewModel.onTap(tapScreen, pageIdx, viewport, transform, tolerance)
                         },
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
@@ -412,7 +421,8 @@ private fun PdfPageItem(
     handle: DocumentHandle?,
     cache: PageBitmapCache,
     selectionState: SelectionOverlayState?,
-    onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform) -> Unit,
+    tapTolerance: TapTolerance,
+    onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform, TapTolerance) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     // Where the LIVE zoom would render.
@@ -426,7 +436,11 @@ private fun PdfPageItem(
         val cached = cache.acquire(PageKey(pageIndex, liveBucket))
         mutableStateOf(cached?.let { RenderedPage(it, liveBucket) })
     }
-    var pageSize by remember(pageIndex) { mutableStateOf<PdfPageGeometry?>(null) }
+    // Keyed on the HANDLE as well as the page (02-REVIEW CR-02). A Lazy item
+    // survives a document swap, so keying on the page alone kept the PREVIOUS
+    // document's geometry - size, rotation and CropBox - for every tap,
+    // overlay quad and render dimension drawn on the reused slot.
+    var pageSize by remember(pageIndex, handle) { mutableStateOf<PdfPageGeometry?>(null) }
     var renderTick by remember { mutableIntStateOf(0) }
 
     // The bucket the bitmap on screen was actually rendered at. This is NOT the
@@ -451,13 +465,13 @@ private fun PdfPageItem(
         onDispose { if (drawn != null) cache.releaseDisplay(drawn) }
     }
 
-    // Load the page's intrinsic size/rotation once.
+    // Load the page's intrinsic size/rotation for THIS handle. The effect is
+    // keyed on the handle too, and does not skip a refetch: after a document
+    // swap the slot must be re-measured, not keep the stale geometry (CR-02).
     LaunchedEffect(handle, pageIndex) {
         val current = handle ?: return@LaunchedEffect
-        if (pageSize == null) {
-            pageSize = withContext(Dispatchers.IO) {
-                current.pageSize(pageIndex)
-            }
+        pageSize = withContext(Dispatchers.IO) {
+            current.pageSize(pageIndex)
         }
     }
 
@@ -489,12 +503,12 @@ private fun PdfPageItem(
         transform?.renderedSize(zoom)
     }
 
-    // Page's real left edge: the offset from the slot origin to the page's
-    // actual rendered content. At fit width this is 0; when zoomed the page
-    // is centred, so the left edge is negative.
-    val displayWidthPx: Float = display?.widthPx?.toFloat() ?: 0f
-    val slotWidthPx = viewportWidthPx.toFloat().coerceIn(0f, displayWidthPx)
-    val pageLeftPx = (slotWidthPx - displayWidthPx) / 2f + panX
+    // The page's real left edge - what the transform wants as its pan, and what the
+    // overlay draws by. The list centres the item, so the edge is negative zoomed in
+    // and positive zoomed below fit width. Clamping the slot to the page width, as
+    // the inlined version did, reported `panX` in the second case and put every tap
+    // and highlight half the page/viewport gap away from its glyph.
+    val pageLeftPx = pageLeftInSlotPx(viewportWidthPx, display?.widthPx ?: 0, panX)
 
     // Re-render only when the pinch has settled (D-09): renderTick increments
     // 250 ms after the zoom stops moving. The bucket is read at that moment, so
@@ -588,34 +602,62 @@ private fun PdfPageItem(
             if (currentTransform != null) {
                 val latestTransform = rememberUpdatedState(currentTransform)
                 val latestViewport = rememberUpdatedState(ViewportState(zoom, pageLeftPx, 0f))
+                val latestTolerance = rememberUpdatedState(tapTolerance)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
                         .pointerInput(pageIndex) {
                             awaitEachGesture {
                                 val down = awaitFirstDown(requireUnconsumed = true)
-                                // Detect tap: only fire onTap if finger lifts without
-                                // moving beyond touch slop.
-                                val up = awaitPointerEvent().changes.firstOrNull { it.pressed }
-                                if (up != null) {
-                                    val dx = Math.abs(up.position.x - down.position.x)
-                                    val dy = Math.abs(up.position.y - down.position.y)
-                                    val distance = dx + dy
-                                    if (distance > viewConfiguration.touchSlop) {
-                                        // Significant movement: not a tap, skip
-                                        return@awaitEachGesture
+                                // A tap is a SHORT, single-pointer press that
+                                // LIFTS without another gesture claiming it.
+                                // Firing on the frame after pointer-down made
+                                // every scroll start, long press and pinch
+                                // dispatch a "tap" from its start position - a
+                                // line near the finger got selected and
+                                // whitespace boxes appeared (02-REVIEW CR-01).
+                                var sawSecondPointer = false
+                                var wasConsumed = false
+                                var upTime = down.uptimeMillis
+                                var upPosition = down.position
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    if (event.changes.size > 1) sawSecondPointer = true
+                                    // A scroll or pan CLAIMS the change; that,
+                                    // not the distance travelled, is what tells
+                                    // a tap from a drag.
+                                    if (event.changes.any { it.isConsumed }) wasConsumed = true
+                                    if (event.changes.none { it.pressed }) {
+                                        upTime = event.changes.maxOf { it.uptimeMillis }
+                                        upPosition = event.changes.first().position
+                                        break
                                     }
+                                }
+                                if (sawSecondPointer || wasConsumed) return@awaitEachGesture
+                                if (upTime - down.uptimeMillis >
+                                    viewConfiguration.longPressTimeoutMillis
+                                ) {
+                                    return@awaitEachGesture
+                                }
+                                if ((upPosition - down.position).getDistance() >
+                                    viewConfiguration.touchSlop
+                                ) {
+                                    return@awaitEachGesture
                                 }
                                 // Read the viewport at tap time. The pointer block
                                 // is keyed on pageIndex, which never changes, so
                                 // anything it captured instead would be frozen at
                                 // first composition and every tap after a pinch
                                 // would be converted with the old zoom.
+                                // CR-01: use lift position (upPosition) rather than
+                                // down position for tap detection — this resolves the
+                                // "tap selects nothing / adjacent line" on-device defect.
                                 onTap(
-                                    PdfPoint(down.position.x, down.position.y),
+                                    PdfPoint(upPosition.x, upPosition.y),
                                     pageIndex,
                                     latestViewport.value,
                                     latestTransform.value,
+                                    latestTolerance.value,
                                 )
                             }
                         },

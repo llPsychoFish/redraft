@@ -17,6 +17,7 @@ import com.redraft.pdfcore.PdfRect
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.ViewportState
 import com.redraft.pdfcore.selection.CharBox
+import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.pdfcore.selection.PageTextLayout
 import com.redraft.pdfcore.selection.TextPageLayout
 import io.legere.pdfiumandroid.suspend.PdfDocumentKt
@@ -361,6 +362,7 @@ class PdfViewerViewModelTest {
     )
 
     private val viewport = ViewportState(zoom = 1f, panX = 0f, panY = 0f)
+    private val tolerance = TapTolerance(horizontalPx = 8f, minLineHeightPx = 32f)
     private val transform = PdfViewportTransform(
         pageWidthPt = 612f,
         pageHeightPt = 792f,
@@ -390,7 +392,7 @@ class PdfViewerViewModelTest {
         )
         openInEditMode(vm)
 
-        vm.onTap(tapOnText, 0, viewport, transform)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
         runCurrent()
         // The extraction is still running: the tap waits, nothing is selected.
         assertNull(vm.selectionState.value)
@@ -414,7 +416,7 @@ class PdfViewerViewModelTest {
         backgroundScope.collectMessages(vm, received)
         openInEditMode(vm)
 
-        vm.onTap(tapOnText, 0, viewport, transform)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
         runCurrent()
         assertNull(vm.selectionState.value)
 
@@ -442,9 +444,9 @@ class PdfViewerViewModelTest {
         backgroundScope.collectMessages(vm, received)
         openInEditMode(vm)
 
-        vm.onTap(tapOnText, 0, viewport, transform)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
         runCurrent()
-        vm.onTap(tapOnText, 0, viewport, transform)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
         runCurrent()
 
         assertEquals(1, received.size)
@@ -462,13 +464,13 @@ class PdfViewerViewModelTest {
         backgroundScope.collectMessages(vm, received)
         openInEditMode(vm)
 
-        vm.onTap(tapOnText, 0, viewport, transform)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
         runCurrent()
         assertEquals(1, received.size)
 
         // The reader leaves page 0 for page 1: the rate limit is cleared.
         vm.onVisiblePagesChanged(setOf(1))
-        vm.onTap(tapOnText, 0, viewport, transform)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
         runCurrent()
 
         assertEquals(2, received.size)
@@ -483,7 +485,7 @@ class PdfViewerViewModelTest {
         )
         openInEditMode(vm)
 
-        vm.onTap(tapOnText, 0, viewport, transform)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
         runCurrent()
         assertNotNull(vm.selectionState.value)
         assertTrue(vm.editMode.value)
