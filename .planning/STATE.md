@@ -4,11 +4,11 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: text-editing-mvp
 status: in_progress
-stopped_at: Completed 03-01-PLAN.md tracer
-last_updated: "2026-11-06T13:19:57.583Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-11-06T14:18:03.842Z"
 last_activity: 2026-11-06
 last_activity_desc: plan 03-01 tracer executed
-state_head: 08f08a0bcbef4cf81571f128ab54dc194e99195f
+state_head: 136a948b3abe3e3724c1ebd6c45b3a391bf94fe1
 progress:
   total_phases: 6
   completed_phases: 3
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-16)
 ## Current Position
 
 Phase: 03 — text-editing-mvp (plan 1 of 3 complete)
-Plan: 1 of 3
+Plan: 2 of 3
 Status: Tracer plan (03-01) complete; vertical slice proven
 Last activity: 2026-11-06 — plan 03-01 tracer executed
 
@@ -67,6 +67,7 @@ Progress: [█████████░] 92% - Phases 1, 01.1, 2 complete; Pha
 | Phase quick-01 P01 | 3min | 3 tasks | 2 files |
 | Phase 02 Pgap-closure | 1800 | 3 tasks | 4 files |
 | Phase 03 P01 | 4200 | 3 tasks | 27 files |
+| Phase 03-text-editing-mvp P02 | 3600 | 3 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,14 @@ Recent decisions affecting current work:
 - [Phase 02]: Reselection via SelectionOverlay.reselectEditedLine() using baselineRect center hit-test
 - [Phase 02]: PdfEditModule lazy native load via double-checked locking
 - [Phase 02]: Modifier.semantics { contentDescription } with pre-resolved string (Modifier.contentDescription unavailable)
+- [Phase 03]: JNI replaceTextObject accepts FontHandle instead of fontName string for bundled font reuse
+- [Phase 03]: Font fallback analysis runs on every keystroke in updateEditorState for live feedback
+- [Phase 03]: Subset fonts (^[A-Z]{6}\+) always trigger bundled Liberation fallback for safety
+- [Phase 03]: Standard 14 fonts keep original only for WinAnsi chars; non-WinAnsi to Liberation
+- [Phase 03]: Unsupported chars (outside U+0020..U+024F) disable Apply with specific notice
+- [Phase 03]: findObjectIndexForCharIndex runs in coroutine (suspend) for JNI calls
+- [Phase 03]: Font cache keyed by Liberation variant name (e.g., LiberationSerifBoldItalic)
+- [Phase 03]: SIL OFL 1.1 license added to AboutScreen open-source notices
 
 ### Pending Todos
 
@@ -135,6 +144,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-06T13:19:57.125Z
-Stopped at: Completed 03-01-PLAN.md tracer
+Last session: 2026-11-06T14:18:03.573Z
+Stopped at: Completed 03-02-PLAN.md
 Resume file: None
