@@ -113,4 +113,14 @@
     <string name="edit_mode">Edit mode</string>
     <string name="no_selectable_text">No selectable text on this page</string>
     <string name="could_not_read_text">Couldn\'t read this page\'s text</string>
+
+    <!-- Editor panel (Phase 3) -->
+    <string name="edit_text_title">Edit Text</string>
+    <string name="edit_selected_text">Edit selected text</string>
+    <string name="cannot_edit_text">Cannot edit this text</string>
+    <string name="font_will_change">Font will change to %s</string>
+    <string name="text_longer_than_line">Text is longer than the original line</string>
+    <string name="cd_editing_line">Editing line: %s</string>
+    <string name="apply">Apply</string>
+    <string name="cancel">Cancel</string>
 </resources>

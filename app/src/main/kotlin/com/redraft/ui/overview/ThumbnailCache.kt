@@ -43,6 +43,11 @@ class ThumbnailCache(maxBytes: Long = 12L * 1024 * 1024) {
 
     fun recycleAll() = cache.recycleAll()
 
+    /** Invalidates the thumbnail for a specific page. */
+    fun invalidate(pageIndex: Int) {
+        cache.invalidatePage(pageIndex)
+    }
+
     /** The total byte size of every thumbnail the LRU currently holds. */
     val sizeBytes: Long get() = cache.sizeBytes
 }

@@ -37,15 +37,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -56,6 +59,8 @@ import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.ViewerMessage
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.data.AppSettings
+import com.redraft.ui.viewer.EditorPanel
+import com.redraft.ui.viewer.EditorPanelState
 
 private val TopBarHeight = 64.dp
 
@@ -73,6 +78,7 @@ fun ViewerRoute(
     val settings by settingsViewModel.settings.collectAsStateWithLifecycle()
     val editMode by viewModel.editMode.collectAsStateWithLifecycle()
     val selection by viewModel.selectionState.collectAsStateWithLifecycle()
+    val editorState by viewModel.editorState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val view = LocalView.current
 
@@ -154,6 +160,29 @@ fun ViewerRoute(
             modifier = Modifier.fillMaxSize(),
         )
 
+        // Editor panel (docked above IME) — visible when editorState has value
+        AnimatedVisibility(
+            visible = editorState != null,
+            enter = fadeIn(animationSpec = tween(150)) + slideInVertically(initialOffsetY = { it }, animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(100)) + slideOutVertically(targetOffsetY = { it }, animationSpec = tween(100)),
+        ) {
+            EditorPanel(
+                state = editorState!!,
+                onTextChange = { newText ->
+                    val updated = editorState!!.withDraftText(newText)
+                    val lengthWarning = newText.length > editorState!!.originalText.length * 1.2 // approximate
+                    val canApply = newText != editorState!!.originalText && !lengthWarning && editorState!!.showUnsupportedChar == null
+                    viewModel.updateEditorState(updated.copy(lengthWarning = lengthWarning, canApply = canApply))
+                },
+                onApply = { viewModel.onApplyEdit(editorState!!.draftText) },
+                onCancel = { viewModel.dismissEditor() },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding() // respect nav bar
+                    .zIndex(10f), // above page content
+            )
+        }
+
         // Overlay TopAppBar with animation
         AnimatedVisibility(
             visible = barsVisible,
@@ -228,6 +257,23 @@ fun ViewerRoute(
                             },
                         )
                     }
+                    // NEW: "Edit text" action — only in Edit mode with selection + editable
+                    if (editMode) {
+                        val currentSelection = selection
+                        val canEdit = currentSelection != null && currentSelection.editable
+                        val editDesc = if (canEdit) stringResource(R.string.edit_selected_text) else stringResource(R.string.cannot_edit_text)
+                        IconButton(
+                            onClick = { viewModel.onEditText() },
+                            enabled = canEdit,
+                            modifier = Modifier.semantics { contentDescription = editDesc },
+                        ) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_edit),
+                                contentDescription = editDesc,
+                                tint = if (canEdit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                            )
+                        }
+                    }
                 },
             )
         }
@@ -244,10 +290,13 @@ fun ViewerRoute(
         )
     }
 
-    // Back handling in Edit mode (D-20): a selected line is cleared first,
-    // then Edit mode is left, then the viewer is left.  The handler is
-    // enabled ONLY while Edit mode is on.
+    // Back handling in Edit mode (D-20, D-301): editor panel is dismissed first,
+    // then a selected line is cleared, then Edit mode is left, then the viewer is left.
+    // The handler is enabled ONLY while Edit mode is on.
     BackHandler(enabled = editMode) {
-        if (selection != null) viewModel.clearSelection() else viewModel.setEditMode(false)
+        val currentSelection = selection
+        if (editorState != null) viewModel.dismissEditor()
+        else if (currentSelection != null) viewModel.clearSelection()
+        else viewModel.setEditMode(false)
     }
 }

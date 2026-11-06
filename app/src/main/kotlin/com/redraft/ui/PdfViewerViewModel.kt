@@ -2,6 +2,7 @@ package com.redraft.ui
 
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -9,6 +10,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.redraft.data.DocumentError
 import com.redraft.pdfcore.PdfPoint
+import com.redraft.pdfcore.PdfRect
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.pdfcore.selection.groupBlocks
@@ -22,6 +24,9 @@ import com.redraft.data.RecentsStore
 import com.redraft.data.SafDocumentOpener
 import com.redraft.pdfcore.ViewportState
 import com.redraft.pdfcore.PdfPageGeometry
+import com.redraft.pdfedit.EditingHandle
+import com.redraft.pdfedit.PdfEditModule
+import com.redraft.ui.viewer.EditorPanelState
 import com.redraft.ui.viewer.PageBitmapCache
 import com.redraft.ui.overview.ThumbnailCache
 import kotlinx.coroutines.CancellationException
@@ -61,6 +66,29 @@ data class ScrollCommand(
     val offsetPx: Int = 0,
     val token: Long = 0L,
 )
+
+/** One committed text edit. Stores full before/after state for undo/redo. */
+data class EditCommand(
+    val documentId: String,           // URI or content hash
+    val pageIndex: Int,
+    val lineId: String,               // blockId from selection (p{page}:b{firstChar})
+    val objectIndex: Int,             // PDFium text object index in editing document
+    val oldText: String,
+    val newText: String,
+    val oldFontName: String,
+    val newFontName: String,
+    val fontSizePt: Float,
+    val color: Int,                   // ARGB
+    val baselineRect: PdfRect,        // PDF coords for reselection
+    val matrix: FloatArray,           // CTM for Path B
+) {
+    fun inverse(): EditCommand = copy(
+        oldText = newText,
+        newText = oldText,
+        oldFontName = newFontName,
+        newFontName = oldFontName,
+    )
+}
 
 data class ViewerUiState(
     val documentName: String? = null,
@@ -150,6 +178,14 @@ class PdfViewerViewModel(
             val geometry = handle.pageSize(index)
             com.redraft.pdfcore.selection.pageTextLayout(handle.document, index, geometry)
         },
+    /**
+     * Factory for the PDF editing engine. Null in tests to avoid native library loading.
+     */
+    private val editingEngineFactory: (() -> com.redraft.pdfedit.PdfEditingEngine)? = null,
+    /**
+     * Content resolver provider for opening file descriptors. In tests, can provide a mock.
+     */
+    private val contentResolverProvider: (() -> android.content.ContentResolver)? = null,
     // Cache ownership (A-1) — single instance per ViewModel
     val pageBitmapCache: PageBitmapCache = PageBitmapCache(),
     val thumbnailCache: ThumbnailCache = ThumbnailCache(),
@@ -215,6 +251,26 @@ class PdfViewerViewModel(
     // cleared when the visible page changes.
     private var lastMessagePageIndex: Int? = null
     private var lastVisiblePageIndex: Int? = null
+
+    // Editor panel state (D-301): draft text, caret, showing, target line ref
+    private val _editorState = MutableStateFlow<EditorPanelState?>(null)
+    val editorState: StateFlow<EditorPanelState?> = _editorState.asStateFlow()
+
+    // Command stack (D-302): per-commit granularity, survives rotation
+    private val _past = mutableListOf<EditCommand>()
+    private val _future = mutableListOf<EditCommand>()
+    private val _pastFlow = MutableStateFlow<List<EditCommand>>(emptyList())
+    private val _futureFlow = MutableStateFlow<List<EditCommand>>(emptyList())
+    val pastCommands: StateFlow<List<EditCommand>> = _pastFlow
+    val futureCommands: StateFlow<List<EditCommand>> = _futureFlow
+
+    // Editing engine + handle (D-303)
+    private var editingEngine: com.redraft.pdfedit.PdfEditingEngine? = null
+    private var editingHandle: EditingHandle? = null
+    private var editingHandleJob: Job? = null
+
+    // Temp file for edit→save→reopen workflow
+    private var currentEditTempFile: java.io.File? = null
 
     /** Number of cached page layouts — exposed for the lifecycle unit tests. */
     internal val cachedLayoutCount: Int get() = textLayoutCache.size
@@ -499,6 +555,176 @@ class PdfViewerViewModel(
         selectionPageIndex = null
     }
 
+    /** Dismisses the inline editor without committing changes. */
+    fun dismissEditor() {
+        _editorState.value = null
+    }
+
+    /** Updates the editor state with new draft text, computing warnings and apply eligibility. */
+    fun updateEditorState(newState: EditorPanelState) {
+        val lengthWarning = newState.draftText.length > newState.originalText.length * 1.2
+        val canApply = newState.draftText != newState.originalText && !lengthWarning && newState.showUnsupportedChar == null
+        _editorState.value = newState.copy(lengthWarning = lengthWarning, canApply = canApply)
+    }
+
+    /** Opens the inline editor for the currently selected line. */
+    fun onEditText() {
+        val selection = _selectionState.value ?: return
+        if (!selection.editable) {
+            // Non-editable: show snackbar via message channel (handled by UI)
+            return
+        }
+        val layout = textLayoutCache[selection.pageIndex] ?: return
+        val line = selection.selectedLine ?: return
+        val fragment = line.fragment
+
+        // Determine if font fallback needed (D-304) - check on Apply, not here
+        // We just show the notice if the font is a subset
+        val fontName = fragment.style.fontName ?: ""
+        val isSubset = fontName.matches(Regex("^[A-Z]{6}\\+"))
+        val fontChangeNotice = if (isSubset) selectBundledFontForNotice(fragment.style) else null
+
+        _editorState.value = EditorPanelState(
+            originalText = line.chars.joinToString("") { it.text }.trim(),
+            draftText = line.chars.joinToString("") { it.text }.trim(),
+            fontSizePt = fragment.style.fontSizePt,
+            textColor = fragment.style.fillColor ?: 0xFF000000.toInt(),
+            fontChangeNotice = fontChangeNotice,
+            lengthWarning = false,
+            canApply = false,
+        )
+    }
+
+    /** Commits the edit: creates EditCommand, executes via JNI, pushes to stack. */
+    fun onApplyEdit(newText: String) {
+        val editor = _editorState.value ?: return
+        val selection = _selectionState.value ?: return
+        val handle = editingHandle ?: return
+        val engine = editingEngine ?: return
+        val line = selection.selectedLine ?: return
+        val fragment = line.fragment
+
+        val cmd = EditCommand(
+            documentId = currentUri ?: "",
+            pageIndex = selection.pageIndex,
+            lineId = selection.blockId ?: "p${selection.pageIndex}:b${line.chars.firstOrNull()?.index ?: 0}",
+            objectIndex = findObjectIndexForLine(selection), // JNI call
+            oldText = editor.originalText,
+            newText = newText,
+            oldFontName = editor.fontChangeNotice ?: fragment.style.fontName ?: "",
+            newFontName = editor.fontChangeNotice ?: fragment.style.fontName ?: "",
+            fontSizePt = editor.fontSizePt,
+            color = editor.textColor,
+            baselineRect = line.rect,
+            matrix = floatArrayOf(1f, 0f, 0f, 1f, line.rect.minX, line.rect.minY),
+        )
+
+        viewModelScope.launch {
+            // Execute mutation (Path A or B)
+            val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
+            if (!success) {
+                engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                    cmd.newFontName, cmd.fontSizePt, cmd.color, cmd.matrix)
+            }
+
+            // Save copy → reopen rendering doc → invalidate cache
+            val tempFile = createTempEditFile()
+            engine.saveAsCopy(handle, tempFile.absolutePath)
+            reopenRenderingDocument(tempFile)
+
+            _past.add(cmd)
+            _pastFlow.value = _past.toList()
+            _future.clear()
+            _futureFlow.value = emptyList()
+            _editorState.value = null
+            triggerReRender(selection.pageIndex)
+        }
+    }
+
+    fun onUndo() { popAndExecute(_past, _future, inverse = true) }
+    fun onRedo() { popAndExecute(_future, _past, inverse = false) }
+
+    private fun popAndExecute(source: MutableList<EditCommand>, target: MutableList<EditCommand>, inverse: Boolean) {
+        val cmd = source.lastOrNull() ?: return
+        val toExecute = if (inverse) cmd.inverse() else cmd
+        source.removeAt(source.lastIndex)
+        target.add(cmd)
+        _pastFlow.value = _past.toList()
+        _futureFlow.value = _future.toList()
+        viewModelScope.launch { executeCommand(toExecute) }
+    }
+
+    private suspend fun executeCommand(cmd: EditCommand) {
+        val handle = editingHandle ?: return
+        val engine = editingEngine ?: return
+        
+        val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
+        if (!success) {
+            engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                cmd.newFontName, cmd.fontSizePt, cmd.color, cmd.matrix)
+        }
+
+        val tempFile = createTempEditFile()
+        engine.saveAsCopy(handle, tempFile.absolutePath)
+        reopenRenderingDocument(tempFile)
+        triggerReRender(cmd.pageIndex)
+    }
+
+    private fun findObjectIndexForLine(selection: com.redraft.ui.viewer.SelectionOverlayState): Int {
+        // Tracer stub: return 0; Plan 03-02 implements proper charIndex→objectIndex mapping via JNI
+        return 0
+    }
+
+    private fun selectBundledFontForNotice(style: com.redraft.pdfcore.selection.TextStyle): String {
+        val baseName = style.fontName ?: ""
+        val isBold = baseName.contains("Bold", true)
+        val isItalic = baseName.contains("Italic", true) || baseName.contains("Oblique", true)
+        return when {
+            baseName.contains("Times", true) || baseName.contains("Serif", true) -> "LiberationSerif"
+            baseName.contains("Courier", true) || baseName.contains("Mono", true) -> "LiberationMono"
+            else -> "LiberationSans"
+        } + (if (isBold) "Bold" else "") + (if (isItalic) "Italic" else "")
+    }
+
+    private fun createTempEditFile(): java.io.File {
+        val file = java.io.File.createTempFile("edit_", ".pdf", android.content.ContextWrapper(android.app.Application()).cacheDir)
+        file.deleteOnExit()
+        currentEditTempFile = file
+        return file
+    }
+
+    private suspend fun reopenRenderingDocument(tempFile: java.io.File) {
+        val handle = currentHandle ?: return
+        val uri = currentUri ?: return
+        
+        // Close the old handle first
+        cleanupScope.launch(NonCancellable) { handle.close() }
+        
+        // Open the new document from the temp file
+        val newHandle = withContext(ioDispatcher) {
+            SafDocumentOpener.open(android.content.ContextWrapper(android.app.Application()), android.net.Uri.fromFile(tempFile))
+        }
+        
+        newHandle.fold(
+            onSuccess = { newHandle ->
+                currentHandle = newHandle
+                _handle.value = newHandle
+            },
+            onFailure = { 
+                // Reopen failed - keep showing old document, show error
+                // In tracer, we just log
+            }
+        )
+    }
+
+    private fun triggerReRender(pageIndex: Int) {
+        pageBitmapCache.invalidatePage(pageIndex)
+        thumbnailCache.invalidate(pageIndex)
+        textLayoutCache.remove(pageIndex)
+        blockIdsByPage.remove(pageIndex)
+        // Kick off render for visible pages (existing mechanism handles this)
+    }
+
     private val openMutex = Mutex()
     private var currentHandle: DocumentHandle? = null
     private var currentUri: String? = null
@@ -635,6 +861,15 @@ class PdfViewerViewModel(
         lastMessagePageIndex = null
         lastVisiblePageIndex = null
         _editMode.value = false
+        // Close editing document
+        editingHandle?.let { handle ->
+            viewModelScope.launch { editingEngine?.close(handle) }
+        }
+        editingHandleJob?.cancel()
+        editingHandle = null
+        editingEngine = null
+        currentEditTempFile?.delete()
+        currentEditTempFile = null
         cleanupScope.launch(NonCancellable) { handle.close() }
     }
 
@@ -682,6 +917,21 @@ class PdfViewerViewModel(
                                 ),
                             )
                             _documentOpened.trySend(Unit)
+
+                            // Initialize editing engine and handle for this document (only if content resolver is available)
+                            contentResolverProvider?.let { provider ->
+                                editingEngine = editingEngineFactory?.invoke() ?: PdfEditModule.engine()
+                                editingHandleJob = viewModelScope.launch {
+                                    val contentResolver = provider()
+                                    val pfd = contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")
+                                    pfd?.use { fileDescriptor ->
+                                        editingEngine?.open(android.net.Uri.parse(uri), fileDescriptor)?.fold(
+                                            onSuccess = { it.also { editingHandle = it } },
+                                            onFailure = { /* log error; editing unavailable */ }
+                                        )
+                                    }
+                                }
+                            }
                         },
                         onFailure = { throwable ->
                             _uiState.update {

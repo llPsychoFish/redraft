@@ -86,6 +86,7 @@ dependencies {
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.ui)
+    implementation(libs.androidx.ui.text)
     implementation(libs.androidx.ui.graphics)
     // Compose preview annotations are referenced by main-source composables, so this stays on the
     // implementation classpath; only the preview renderer itself is debug-only.

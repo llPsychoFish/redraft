@@ -160,6 +160,26 @@ class PageBitmapCache(
     }
 
     /**
+     * Invalidates all cached bitmaps for [pageIndex] across all zoom buckets.
+     * Also removes thumbnail and text layout cache entries for the page.
+     * Called after an edit commits and the rendering document is reopened.
+     */
+    fun invalidatePage(pageIndex: Int) {
+        synchronized(lru) {
+            val keysToRemove = lru.snapshot().keys.filter { it.pageIndex == pageIndex }
+            for (key in keysToRemove) {
+                val bitmap = lru.get(key)
+                if (bitmap != null) {
+                    refs.releaseFromCache(bitmap)
+                    recycleIfUnreferenced(bitmap)
+                }
+                lru.remove(key)
+            }
+        }
+        // Also notify ThumbnailCache and text layout cache (via ViewModel)
+    }
+
+    /**
      * A bitmap nothing references any more is queued for recycling.
      *
      * The free is deferred by a couple of frames: the frame that last drew the

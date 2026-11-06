@@ -15,9 +15,12 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.redraft.pdfcore.PdfPoint
+import com.redraft.pdfcore.PdfRect
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.ViewportState
 import com.redraft.pdfcore.selection.TextLine
+import com.redraft.pdfcore.selection.hitTest
+import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.R
 import kotlin.math.abs
 
@@ -162,4 +165,45 @@ private fun selectionPath(
     }
     path.close()
     return path
+}
+
+/**
+ * Reselects the edited line after a page re-render.
+ *
+ * Given the [baselineRect] of the originally edited line (in PDF coordinates),
+ * converts its center to screen coordinates via [transform], then performs a
+ * hit test at that position against the [newLayout] to find the corresponding
+ * line in the re-rendered page. Updates [selectionState] with the new line.
+ *
+ * This is called from [PdfViewerViewModel] after an edit commits and the page
+ * re-renders, to preserve the selection on the edited line (D-305).
+ */
+fun reselectEditedLine(
+    pageIndex: Int,
+    baselineRect: PdfRect,
+    newLayout: com.redraft.pdfcore.selection.TextPageLayout,
+    viewport: ViewportState,
+    transform: PdfViewportTransform,
+    tolerance: TapTolerance,
+    onSelectionChange: (SelectionOverlayState?) -> Unit,
+) {
+    // Convert baselineRect center (PDF coords) to screen
+    val centerPdf = PdfPoint(
+        (baselineRect.minX + baselineRect.maxX) * 0.5f,
+        (baselineRect.minY + baselineRect.maxY) * 0.5f
+    )
+    val tapScreen = transform.pdfToScreen(centerPdf, viewport)
+
+    // Perform hit test at the same position to find the new line
+    // hitTest expects screen coordinates as PdfPoint (parameter name is misleading)
+    val tapScreenAsPdfPoint = com.redraft.pdfcore.PdfPoint(tapScreen.x, tapScreen.y)
+    val result = hitTest(tapScreenAsPdfPoint, newLayout, viewport, transform, tolerance)
+    onSelectionChange(result?.let {
+        SelectionOverlayState(
+            selectedLine = it.line,
+            blockId = it.line.blockId ?: it.line.blockId,
+            editable = it.line.fragment.editable,
+            pageIndex = pageIndex,
+        )
+    })
 }
