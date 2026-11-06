@@ -114,7 +114,7 @@ fun ViewerRoute(
     // here, so the copy stays in strings.xml.
     val snackbarHostState = remember { SnackbarHostState() }
     val noSelectableText = stringResource(R.string.no_selectable_text)
-    val couldNotReadText = stringResource(R.string.could_not_read_text_v2)
+    val couldNotReadText = stringResource(R.string.could_not_read_text)
     val editFailed = stringResource(R.string.edit_failed)
     LaunchedEffect(viewModel, noSelectableText, couldNotReadText, editFailed) {
         viewModel.messages.collect { message ->
