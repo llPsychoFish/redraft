@@ -120,6 +120,10 @@
     <string name="cannot_edit_text">Cannot edit this text</string>
     <string name="font_will_change">Font will change to %s</string>
     <string name="text_longer_than_line">Text is longer than the original line</string>
+    <string name="unsupported_char_notice">Character \"%s\" is not supported in bundled fonts</string>
+    <string name="font_fallback_serif">Liberation Serif</string>
+    <string name="font_fallback_sans">Liberation Sans</string>
+    <string name="font_fallback_mono">Liberation Mono</string>
     <string name="cd_editing_line">Editing line: %s</string>
     <string name="apply">Apply</string>
     <string name="cancel">Cancel</string>

@@ -15,7 +15,7 @@ interface PdfEditingEngine {
         pageIndex: Int,
         objectIndex: Int,
         newText: String,
-        fontName: String,
+        fontHandle: FontHandle,
         fontSizePt: Float,
         color: Int,
         matrix: FloatArray
@@ -45,7 +45,7 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
     private external fun nativeClose(handle: Long)
     private external fun nativeSetText(handle: Long, pageIndex: Int, objectIndex: Int, newText: String): Boolean
     private external fun nativeReplaceTextObject(handle: Long, pageIndex: Int, objectIndex: Int,
-        newText: String, fontName: String, fontSizePt: Float, color: Int, matrix: FloatArray)
+        newText: String, fontHandle: Long, fontSizePt: Float, color: Int, matrix: FloatArray)
     private external fun nativeSaveAsCopy(handle: Long, destPath: String): Boolean
     private external fun nativeLoadBundledFont(handle: Long, fontName: String, bold: Boolean, italic: Boolean, fontData: ByteArray): Long
     private external fun nativeGetTextObjectCount(handle: Long, pageIndex: Int): Int
@@ -70,9 +70,9 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
         }
 
     override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int,
-        newText: String, fontName: String, fontSizePt: Float, color: Int, matrix: FloatArray) =
+        newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: FloatArray) =
         withContext(Dispatchers.IO) {
-            nativeReplaceTextObject(handle.ptr, pageIndex, objectIndex, newText, fontName, fontSizePt, color, matrix)
+            nativeReplaceTextObject(handle.ptr, pageIndex, objectIndex, newText, fontHandle.ptr, fontSizePt, color, matrix)
         }
 
     override suspend fun saveAsCopy(handle: EditingHandle, destPath: String): Boolean =

@@ -25,6 +25,7 @@ import com.redraft.data.SafDocumentOpener
 import com.redraft.pdfcore.ViewportState
 import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfedit.EditingHandle
+import com.redraft.pdfedit.FontHandle
 import com.redraft.pdfedit.PdfEditModule
 import com.redraft.ui.viewer.EditorPanelState
 import com.redraft.ui.viewer.PageBitmapCache
@@ -54,6 +55,8 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.LinkedHashMap
+import java.util.regex.Pattern
 
 /**
  * A one-shot request to move the list to a page.
@@ -88,6 +91,85 @@ data class EditCommand(
         oldFontName = newFontName,
         newFontName = oldFontName,
     )
+}
+
+/** Font fallback decision for an edit. */
+enum class FontFallbackDecision {
+    KEEP_ORIGINAL,        // Original font can encode the new text
+    USE_BUNDLED_FALLBACK, // Subset font or unsupported chars → use Liberation font
+    UNSUPPORTED_CHARS     // New text contains chars outside Liberation Latin coverage
+}
+
+/** Analysis of the original font for fallback decision. */
+data class FontAnalysis(
+    val originalFontName: String,
+    val isSubset: Boolean,
+    val isStandard14: Boolean,
+    val bold: Boolean,
+    val italic: Boolean,
+)
+
+/** Constants for font fallback logic (D-304). */
+private object FontFallbackConstants {
+    // Standard 14 PostScript fonts
+    val STANDARD_14_FONTS = setOf(
+        "Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic",
+        "Helvetica", "Helvetica-Bold", "Helvetica-Oblique", "Helvetica-BoldOblique",
+        "Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique",
+        "Symbol", "ZapfDingbats"
+    )
+    
+    // WinAnsi encoding range (0x20-0xFF)
+    val WIN_ANSI_CHARS: Set<Char> = (0x20..0xFF).map { it.toChar() }.toSet()
+    
+    // Liberation fonts cover Latin Extended-A (U+0020..U+024F)
+    val LIBERATION_LATIN_CHARS: Set<Char> = (0x0020..0x024F).map { it.toChar() }.toSet()
+}
+
+/** Selects the appropriate bundled Liberation font for a font analysis. */
+private fun selectBundledFont(analysis: FontAnalysis): String {
+    val baseName = if (analysis.originalFontName.matches(Regex("^[A-Z]{6}\\+")))
+        analysis.originalFontName.substringAfterLast("+")
+    else
+        analysis.originalFontName
+    
+    val family = when {
+        baseName.contains("Times", true) || baseName.contains("Serif", true) -> "LiberationSerif"
+        baseName.contains("Courier", true) || baseName.contains("Mono", true) -> "LiberationMono"
+        else -> "LiberationSans"
+    }
+    return "$family${if (analysis.bold) "Bold" else ""}${if (analysis.italic) "Italic" else ""}"
+}
+
+/** Analyzes whether the original font can handle the new text, or if fallback is needed. */
+private fun analyzeFontForEdit(
+    originalFontName: String,
+    newText: String,
+    originalText: String
+): FontFallbackDecision {
+    val isSubset = originalFontName.matches(Regex("^[A-Z]{6}\\+"))
+    val baseName = if (isSubset) originalFontName.substringAfterLast("+") else originalFontName
+    val isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(baseName)
+    
+    // Characters being added (in new but not in original)
+    val newChars = newText.toSet() - originalText.toSet()
+    
+    // Deletion or reordering only — no new characters to encode
+    if (newChars.isEmpty()) return FontFallbackDecision.KEEP_ORIGINAL
+    
+    // Non-subset standard 14 font with all new chars in WinAnsi
+    if (!isSubset && isStandard14 && newChars.all { it in FontFallbackConstants.WIN_ANSI_CHARS }) {
+        return FontFallbackDecision.KEEP_ORIGINAL
+    }
+    
+    // Check for unsupported characters (outside Liberation Latin coverage)
+    val unsupportedChar = newChars.firstOrNull { it !in FontFallbackConstants.LIBERATION_LATIN_CHARS }
+    if (unsupportedChar != null) {
+        return FontFallbackDecision.UNSUPPORTED_CHARS
+    }
+    
+    // Subset font or standard font with chars outside WinAnsi but within Liberation coverage
+    return FontFallbackDecision.USE_BUNDLED_FALLBACK
 }
 
 data class ViewerUiState(
@@ -268,6 +350,9 @@ class PdfViewerViewModel(
     private var editingEngine: com.redraft.pdfedit.PdfEditingEngine? = null
     private var editingHandle: EditingHandle? = null
     private var editingHandleJob: Job? = null
+
+    // Font cache for bundled fonts (loaded once per editing document)
+    private val fontCache = mutableMapOf<String, FontHandle>()
 
     // Temp file for edit→save→reopen workflow
     private var currentEditTempFile: java.io.File? = null
@@ -562,9 +647,44 @@ class PdfViewerViewModel(
 
     /** Updates the editor state with new draft text, computing warnings and apply eligibility. */
     fun updateEditorState(newState: EditorPanelState) {
-        val lengthWarning = newState.draftText.length > newState.originalText.length * 1.2
-        val canApply = newState.draftText != newState.originalText && !lengthWarning && newState.showUnsupportedChar == null
-        _editorState.value = newState.copy(lengthWarning = lengthWarning, canApply = canApply)
+        val editor = _editorState.value ?: return
+        val selection = _selectionState.value ?: return
+        val line = selection.selectedLine ?: return
+        val fragment = line.fragment
+        
+        val fontName = fragment.style.fontName ?: ""
+        val fontAnalysis = FontAnalysis(
+            originalFontName = fontName,
+            isSubset = fontName.matches(Regex("^[A-Z]{6}\\+")),
+            isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(
+                if (fontName.matches(Regex("^[A-Z]{6}\\+"))) fontName.substringAfterLast("+") else fontName
+            ),
+            bold = fontName.contains("Bold", true),
+            italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
+        )
+        
+        val fallbackDecision = analyzeFontForEdit(fontName, newState.draftText, editor.originalText)
+        
+        val fontChangeNotice = when (fallbackDecision) {
+            FontFallbackDecision.USE_BUNDLED_FALLBACK -> selectBundledFont(fontAnalysis)
+            else -> null
+        }
+        val showUnsupportedChar = when (fallbackDecision) {
+            FontFallbackDecision.UNSUPPORTED_CHARS -> {
+                val newChars = newState.draftText.toSet() - editor.originalText.toSet()
+                newChars.firstOrNull { it !in FontFallbackConstants.LIBERATION_LATIN_CHARS }
+            }
+            else -> null
+        }
+        val lengthWarning = newState.draftText.length > editor.originalText.length * 1.2
+        val canApply = fallbackDecision != FontFallbackDecision.UNSUPPORTED_CHARS && !lengthWarning && newState.draftText != editor.originalText
+
+        _editorState.value = newState.copy(
+            fontChangeNotice = fontChangeNotice,
+            lengthWarning = lengthWarning,
+            canApply = canApply,
+            showUnsupportedChar = showUnsupportedChar,
+        )
     }
 
     /** Opens the inline editor for the currently selected line. */
@@ -578,20 +698,45 @@ class PdfViewerViewModel(
         val line = selection.selectedLine ?: return
         val fragment = line.fragment
 
-        // Determine if font fallback needed (D-304) - check on Apply, not here
-        // We just show the notice if the font is a subset
+        // Full font fallback analysis (D-304)
+        val originalText = line.chars.joinToString("") { it.text }.trim()
         val fontName = fragment.style.fontName ?: ""
-        val isSubset = fontName.matches(Regex("^[A-Z]{6}\\+"))
-        val fontChangeNotice = if (isSubset) selectBundledFontForNotice(fragment.style) else null
+        val fontAnalysis = FontAnalysis(
+            originalFontName = fontName,
+            isSubset = fontName.matches(Regex("^[A-Z]{6}\\+")),
+            isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(
+                if (fontName.matches(Regex("^[A-Z]{6}\\+"))) fontName.substringAfterLast("+") else fontName
+            ),
+            bold = fontName.contains("Bold", true),
+            italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
+        )
+        
+        // Initial analysis with original text (no new chars yet)
+        val fallbackDecision = analyzeFontForEdit(fontName, originalText, originalText)
+        
+        val fontChangeNotice = when (fallbackDecision) {
+            FontFallbackDecision.USE_BUNDLED_FALLBACK -> selectBundledFont(fontAnalysis)
+            else -> null
+        }
+        val showUnsupportedChar = when (fallbackDecision) {
+            FontFallbackDecision.UNSUPPORTED_CHARS -> {
+                // Find first unsupported char in original text (shouldn't happen normally)
+                val unsupported = originalText.toSet() - FontFallbackConstants.LIBERATION_LATIN_CHARS
+                unsupported.firstOrNull()
+            }
+            else -> null
+        }
+        val canApply = fallbackDecision != FontFallbackDecision.UNSUPPORTED_CHARS
 
         _editorState.value = EditorPanelState(
-            originalText = line.chars.joinToString("") { it.text }.trim(),
-            draftText = line.chars.joinToString("") { it.text }.trim(),
+            originalText = originalText,
+            draftText = originalText,
             fontSizePt = fragment.style.fontSizePt,
             textColor = fragment.style.fillColor ?: 0xFF000000.toInt(),
             fontChangeNotice = fontChangeNotice,
             lengthWarning = false,
-            canApply = false,
+            canApply = canApply,
+            showUnsupportedChar = showUnsupportedChar,
         )
     }
 
@@ -604,27 +749,60 @@ class PdfViewerViewModel(
         val line = selection.selectedLine ?: return
         val fragment = line.fragment
 
-        val cmd = EditCommand(
-            documentId = currentUri ?: "",
-            pageIndex = selection.pageIndex,
-            lineId = selection.blockId ?: "p${selection.pageIndex}:b${line.chars.firstOrNull()?.index ?: 0}",
-            objectIndex = findObjectIndexForLine(selection), // JNI call
-            oldText = editor.originalText,
-            newText = newText,
-            oldFontName = editor.fontChangeNotice ?: fragment.style.fontName ?: "",
-            newFontName = editor.fontChangeNotice ?: fragment.style.fontName ?: "",
-            fontSizePt = editor.fontSizePt,
-            color = editor.textColor,
-            baselineRect = line.rect,
-            matrix = floatArrayOf(1f, 0f, 0f, 1f, line.rect.minX, line.rect.minY),
+        // Determine font for this edit
+        val fontName = fragment.style.fontName ?: ""
+        val fontAnalysis = FontAnalysis(
+            originalFontName = fontName,
+            isSubset = fontName.matches(Regex("^[A-Z]{6}\\+")),
+            isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(
+                if (fontName.matches(Regex("^[A-Z]{6}\\+"))) fontName.substringAfterLast("+") else fontName
+            ),
+            bold = fontName.contains("Bold", true),
+            italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
         )
-
+        val fallbackDecision = analyzeFontForEdit(fontName, newText, editor.originalText)
+        val newFontName = when (fallbackDecision) {
+            FontFallbackDecision.USE_BUNDLED_FALLBACK -> selectBundledFont(fontAnalysis)
+            else -> fontName
+        }
+        
         viewModelScope.launch {
+            // Compute objectIndex from charIndex (suspend JNI calls)
+            val charIndex = line.chars.firstOrNull()?.index ?: return@launch
+            val objectIndex = findObjectIndexForCharIndex(handle, selection.pageIndex, charIndex)
+            
+            // Load bundled font if needed
+            var fontHandle: FontHandle? = null
+            if (fallbackDecision == FontFallbackDecision.USE_BUNDLED_FALLBACK) {
+                fontHandle = fontCache.getOrPut(newFontName) {
+                    engine.loadBundledFont(handle, newFontName, fontAnalysis.bold, fontAnalysis.italic)
+                }
+            }
+
+            val cmd = EditCommand(
+                documentId = currentUri ?: "",
+                pageIndex = selection.pageIndex,
+                lineId = selection.blockId ?: "p${selection.pageIndex}:b${line.chars.firstOrNull()?.index ?: 0}",
+                objectIndex = objectIndex,
+                oldText = editor.originalText,
+                newText = newText,
+                oldFontName = fontName,
+                newFontName = newFontName,
+                fontSizePt = editor.fontSizePt,
+                color = editor.textColor,
+                baselineRect = line.rect,
+                matrix = floatArrayOf(1f, 0f, 0f, 1f, line.rect.minX, line.rect.minY),
+            )
+
             // Execute mutation (Path A or B)
             val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
-            if (!success) {
+            if (!success && fontHandle != null) {
                 engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                    cmd.newFontName, cmd.fontSizePt, cmd.color, cmd.matrix)
+                    fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
+            } else if (!success) {
+                // Fallback: try with standard font (shouldn't happen if analysis is correct)
+                engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                    FontHandle(0), cmd.fontSizePt, cmd.color, cmd.matrix)
             }
 
             // Save copy → reopen rendering doc → invalidate cache
@@ -660,8 +838,19 @@ class PdfViewerViewModel(
         
         val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
         if (!success) {
+            // For undo/redo, we need to load the font if it's a bundled font
+            val fontHandle = if (cmd.newFontName != cmd.oldFontName && cmd.newFontName.startsWith("Liberation")) {
+                fontCache.getOrPut(cmd.newFontName) {
+                    // We need to determine bold/italic from the font name
+                    val bold = cmd.newFontName.contains("Bold")
+                    val italic = cmd.newFontName.contains("Italic")
+                    engine.loadBundledFont(handle, cmd.newFontName, bold, italic)
+                }
+            } else {
+                FontHandle(0)
+            }
             engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                cmd.newFontName, cmd.fontSizePt, cmd.color, cmd.matrix)
+                fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
         }
 
         val tempFile = createTempEditFile()
@@ -670,20 +859,16 @@ class PdfViewerViewModel(
         triggerReRender(cmd.pageIndex)
     }
 
-    private fun findObjectIndexForLine(selection: com.redraft.ui.viewer.SelectionOverlayState): Int {
-        // Tracer stub: return 0; Plan 03-02 implements proper charIndex→objectIndex mapping via JNI
-        return 0
-    }
-
-    private fun selectBundledFontForNotice(style: com.redraft.pdfcore.selection.TextStyle): String {
-        val baseName = style.fontName ?: ""
-        val isBold = baseName.contains("Bold", true)
-        val isItalic = baseName.contains("Italic", true) || baseName.contains("Oblique", true)
-        return when {
-            baseName.contains("Times", true) || baseName.contains("Serif", true) -> "LiberationSerif"
-            baseName.contains("Courier", true) || baseName.contains("Mono", true) -> "LiberationMono"
-            else -> "LiberationSans"
-        } + (if (isBold) "Bold" else "") + (if (isItalic) "Italic" else "")
+    private suspend fun findObjectIndexForCharIndex(handle: EditingHandle, pageIndex: Int, charIndex: Int): Int {
+        val engine = editingEngine ?: return 0
+        val count = engine.getTextObjectCount(handle, pageIndex)
+        var accumulated = 0
+        for (objIdx in 0 until count) {
+            val objCharCount = engine.getTextObjectCharCount(handle, pageIndex, objIdx)
+            accumulated += objCharCount
+            if (charIndex < accumulated) return objIdx
+        }
+        return 0 // Fallback
     }
 
     private fun createTempEditFile(): java.io.File {

@@ -31,7 +31,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeSetText(
 JNIEXPORT void JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeReplaceTextObject(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex,
-    jstring newText, jstring fontName, jfloat fontSizePt, jint color, jfloatArray matrix);
+    jstring newText, jlong fontHandle, jfloat fontSizePt, jint color, jfloatArray matrix);
 
 // 5. Save as copy to temp file
 JNIEXPORT jboolean JNICALL

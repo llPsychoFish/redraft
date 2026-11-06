@@ -61,6 +61,7 @@ private data class Notice(val library: String, val licence: String)
 private val openSourceNotices = listOf(
     Notice("PDFium (Chromium)", "BSD-3-Clause and Apache-2.0"),
     Notice("pdfiumandroid (io.legere)", "Apache-2.0"),
+    Notice("Liberation Fonts", "SIL OFL 1.1"),
     Notice("Kotlin standard library", "Apache-2.0"),
     Notice("Kotlin coroutines", "Apache-2.0"),
     Notice("AndroidX: Compose, Lifecycle, Navigation, DataStore, Activity, Core", "Apache-2.0"),

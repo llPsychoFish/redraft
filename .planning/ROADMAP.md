@@ -15,7 +15,7 @@ Redraft ships as five vertical MVP phases: first a working SAF-opened PDFium vie
 
 - [x] **Phase 1: Foundation & Viewer** - Project scaffold, PDFium integration, SAF open + recent files, lazy-paged Compose viewer with pinch-zoom and LRU bitmap cache
 - [x] **Phase 01.1: UI, Settings & Release Prep** (INSERTED) - Branded theme, settings/About/Support screens, app identity, signed v0.1.0 release (detour before Phase 2) (completed 2026-10-25)
-- [ ] **Phase 2: Selection & Hit-Testing** - Tap resolves to real PDFium objects; bbox overlays; logical block merging for fragmented text runs
+- [x] **Phase 2: Selection & Hit-Testing** - Tap resolves to real PDFium objects; bbox overlays; logical block merging for fragmented text runs
 - [ ] **Phase 3: Text Editing MVP** - Inline editor, commit + re-render, undo/redo command stack, font-subset fallback (the core value)
 - [ ] **Phase 4: Image & Object Editing** - Image select/move/resize/delete/replace; text move/delete
 - [ ] **Phase 5: Save & Hardening** - Save-as-copy with content-stream regeneration, undo-stack checkpointing, graceful error handling
@@ -148,9 +148,10 @@ normalises to 270°. Phase 2 fixes all three at the source: feed the UNROTATED c
 coerced 0..3 index into the transform, subtract the crop origin exactly once inside it, and add
 **no second rotation step** anywhere else (renderer, hit test or overlay).
 
-**Plans**: 3/3 plans executed
+**Plans**: 4/4 plans executed
 
 Plans:
+- [x] 02-GAP-CLOSURE-PLAN.md
 
 - [x] 02-01: Hit-testing — tap → PDFium object via inverse transforms; text object enumeration
 - [x] 02-02: Logical block merging for fragmented runs (proximity + font metrics) + selection overlay with bbox drawing
@@ -175,7 +176,7 @@ Plans:
 
 Plans:
 
-- [ ] 03-01-PLAN.md — Tracer: End-to-end "edit one word" — JNI Path A + Editor UI + re-render + reselection
+- [x] 03-01-PLAN.md — Tracer: End-to-end "edit one word" — JNI Path A + Editor UI + re-render + reselection
 - [ ] 03-02-PLAN.md — JNI Path B + Font Fallback + Command Stack + Object Matching
 - [ ] 03-03-PLAN.md — Cross-fade + Error Handling + Rotation Survival + UX Polish + Integration Tests
 
@@ -229,7 +230,7 @@ Phases execute in numeric order: 1 → 01.1 → 2 → 3 → 4 → 5
 |-------|----------------|--------|-----------|
 | 1. Foundation & Viewer | 14/14 | Complete    | 2026-10-20 |
 | 01.1. UI, Settings & Release Prep | 8/8 | Complete    | 2026-10-25 |
-| 2. Selection & Hit-Testing | 3/3 | Plans executed — verification gaps remain | - |
-| 3. Text Editing MVP | 0/3 | Not started | - |
+| 2. Selection & Hit-Testing | 4/4 | Plans executed — verification gaps remain | - |
+| 3. Text Editing MVP | 1/3 | In Progress | - |
 | 4. Image & Object Editing | 0/2 | Not started | - |
 | 5. Save & Hardening | 0/2 | Not started | - |

@@ -1,20 +1,20 @@
 ---
-gsd_state_version: 1.0
+gsd_state_version: "1.0"
 milestone: v1.0
-milestone_name: milestone
-current_phase: 02
-current_phase_name: Selection & Hit-Testing
+current_phase: 03
+current_phase_name: text-editing-mvp
 status: in_progress
-stopped_at: Phase 03 context gathered
-last_updated: "2026-11-06T11:23:45.029Z"
-last_activity: 2026-11-03
-last_activity_desc: plan 02-03 gap closure executed
+stopped_at: Completed 03-01-PLAN.md tracer
+last_updated: "2026-11-06T13:19:57.583Z"
+last_activity: 2026-11-06
+last_activity_desc: plan 03-01 tracer executed
+state_head: 08f08a0bcbef4cf81571f128ab54dc194e99195f
 progress:
-  total_phases: 4
-  completed_phases: 2
-  total_plans: 26
-  completed_plans: 25
-state_head: 6ebf772
+  total_phases: 6
+  completed_phases: 3
+  total_plans: 29
+  completed_plans: 28
+milestone_name: milestone
 ---
 
 # Project State
@@ -24,16 +24,16 @@ state_head: 6ebf772
 See: .planning/PROJECT.md (updated 2026-10-16)
 
 **Core value:** Editing existing PDF content must actually work — true content editing inside PDFs, not annotation.
-**Current focus:** Phase 02 — Selection & Hit-Testing
+**Current focus:** Phase 03 — Text Editing MVP
 
 ## Current Position
 
-Phase: 02 — selection & hit-testing (plans executed, verification gaps remain)
-Plan: 3 of 3
-Status: Plan 02-03 (gap closure) complete; remaining gaps belong to verification, not to a plan
-Last activity: 2026-11-03 — plan 02-03 gap closure executed
+Phase: 03 — text-editing-mvp (plan 1 of 3 complete)
+Plan: 1 of 3
+Status: Tracer plan (03-01) complete; vertical slice proven
+Last activity: 2026-11-06 — plan 03-01 tracer executed
 
-Progress: [████████░░] 83% - Phases 1 and 01.1 complete; Phase 2 plans done, verification open (6 phases in the milestone, 2 done)
+Progress: [█████████░] 92% - Phases 1, 01.1, 2 complete; Phase 3 plan 1 done
 
 ## Performance Metrics
 
@@ -65,6 +65,8 @@ Progress: [████████░░] 83% - Phases 1 and 01.1 complete; Pha
 | Phase 1 P01-02 | 0 | 3 tasks | 13 files |
 | Phase 1 P01-03 | 0 | 3 tasks | 12 files |
 | Phase quick-01 P01 | 3min | 3 tasks | 2 files |
+| Phase 02 Pgap-closure | 1800 | 3 tasks | 4 files |
+| Phase 03 P01 | 4200 | 3 tasks | 27 files |
 
 ## Accumulated Context
 
@@ -83,6 +85,15 @@ Recent decisions affecting current work:
 - 2026-10-17: Zoom clamped to [1f, 5f] and quantized to Z_00_SCALE_BUCKETS; pinch live-scales the cached bitmap and re-renders only after a 250 ms settle
 - 2026-11-03: A selection tap is detected on finger LIFT (unconsumed, single pointer, under the long-press timeout, within touch slop) rather than on pointer-down; the page slot's geometry is remembered with the document handle key and refetched on handle change
 - 2026-11-03: Only extraction and `groupBlocks` leave Main in the ViewModel — the layout LRU, per-page states and job map are Main-confined, and extraction is never started from Read mode
+- [Phase 02]: JNI module uses byte-array font loading instead of file descriptors for testability
+- [Phase 02]: Content resolver provider injected for testability; editing engine only initializes when provider present
+- [Phase 02]: Tracer uses Path A only (FPDFText_SetText) with objectIndex=0 stub; Path B and proper charIndex→objectIndex mapping deferred to Plan 03-02
+- [Phase 02]: Editor panel uses defaults for keyboardOptions/keyboardActions (Compose 1.12 API)
+- [Phase 02]: Command stack uses per-commit granularity with EditCommand.inverse() for undo/redo
+- [Phase 02]: Targeted cache invalidation via PageBitmapCache.invalidatePage() + ThumbnailCache.invalidate()
+- [Phase 02]: Reselection via SelectionOverlay.reselectEditedLine() using baselineRect center hit-test
+- [Phase 02]: PdfEditModule lazy native load via double-checked locking
+- [Phase 02]: Modifier.semantics { contentDescription } with pre-resolved string (Modifier.contentDescription unavailable)
 
 ### Pending Todos
 
@@ -124,6 +135,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-06T11:23:44.990Z
-Stopped at: Phase 03 context gathered
-Resume file: .planning/phases/03-text-editing-mvp/03-CONTEXT.md
+Last session: 2026-11-06T13:19:57.125Z
+Stopped at: Completed 03-01-PLAN.md tracer
+Resume file: None

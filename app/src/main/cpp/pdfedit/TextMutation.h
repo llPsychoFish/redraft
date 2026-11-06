@@ -17,7 +17,7 @@ bool setText(EditingDocument* doc, int pageIndex, int objectIndex,
 // Removes old object, creates new text object with same matrix/size/color
 void replaceTextObject(EditingDocument* doc, int pageIndex, int objectIndex,
                        const std::u16string& newText,
-                       const std::u16string& fontName, float fontSizePt,
+                       FPDF_FONT font, float fontSizePt,
                        int color, const float* matrix); // CTM 6 floats: [a, b, c, d, e, f]
 
 // Get text object count for a page (for matching charIndex to objectIndex)

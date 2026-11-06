@@ -116,7 +116,7 @@ class PdfViewerViewModelTest {
             Result.success(EditingHandle(0))
         override suspend fun close(handle: EditingHandle) {}
         override suspend fun setText(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String): Boolean = true
-        override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String, fontName: String, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray) {}
+        override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray) {}
         override suspend fun saveAsCopy(handle: EditingHandle, destPath: String): Boolean = true
         override suspend fun loadBundledFont(handle: EditingHandle, fontName: String, bold: Boolean, italic: Boolean): FontHandle = FontHandle(0)
         override suspend fun getTextObjectCount(handle: EditingHandle, pageIndex: Int): Int = 0

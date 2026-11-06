@@ -83,17 +83,15 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeSetText(
 extern "C" JNIEXPORT void JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeReplaceTextObject(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex,
-    jstring newText, jstring fontName, jfloat fontSizePt, jint color, jfloatArray matrix) {
+    jstring newText, jlong fontHandle, jfloat fontSizePt, jint color, jfloatArray matrix) {
     EditingHandle doc = reinterpret_cast<EditingHandle>(handle);
     const char* text = env->GetStringUTFChars(newText, nullptr);
-    const char* font = env->GetStringUTFChars(fontName, nullptr);
     std::u16string wideText = utf8ToUtf16(text);
-    std::u16string wideFont = utf8ToUtf16(font);
     jfloat* matrixArr = env->GetFloatArrayElements(matrix, nullptr);
+    FPDF_FONT font = reinterpret_cast<FPDF_FONT>(fontHandle);
     TextMutation::replaceTextObject(doc, pageIndex, objectIndex, wideText,
-        wideFont, fontSizePt, color, matrixArr);
+        font, fontSizePt, color, matrixArr);
     env->ReleaseStringUTFChars(newText, text);
-    env->ReleaseStringUTFChars(fontName, font);
     env->ReleaseFloatArrayElements(matrix, matrixArr, 0);
 }
 

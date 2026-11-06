@@ -81,6 +81,14 @@ fun EditorPanel(
                     text = stringResource(com.redraft.R.string.text_longer_than_line),
                     style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
                     color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
+                )
+            }
+            if (state.showUnsupportedChar != null) {
+                Text(
+                    text = stringResource(com.redraft.R.string.unsupported_char_notice, state.showUnsupportedChar.toString()),
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                     modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
                 )
             }
