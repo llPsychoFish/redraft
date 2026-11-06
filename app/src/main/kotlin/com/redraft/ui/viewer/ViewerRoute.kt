@@ -34,7 +34,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -112,12 +114,14 @@ fun ViewerRoute(
     // here, so the copy stays in strings.xml.
     val snackbarHostState = remember { SnackbarHostState() }
     val noSelectableText = stringResource(R.string.no_selectable_text)
-    val couldNotReadText = stringResource(R.string.could_not_read_text)
-    LaunchedEffect(viewModel, noSelectableText, couldNotReadText) {
+    val couldNotReadText = stringResource(R.string.could_not_read_text_v2)
+    val editFailed = stringResource(R.string.edit_failed)
+    LaunchedEffect(viewModel, noSelectableText, couldNotReadText, editFailed) {
         viewModel.messages.collect { message ->
             val text = when (message) {
                 ViewerMessage.NoSelectableText -> noSelectableText
                 ViewerMessage.CouldNotReadText -> couldNotReadText
+                ViewerMessage.EditFailed -> editFailed
             }
             snackbarHostState.showSnackbar(text)
         }
@@ -261,17 +265,33 @@ fun ViewerRoute(
                     if (editMode) {
                         val currentSelection = selection
                         val canEdit = currentSelection != null && currentSelection.editable
-                        val editDesc = if (canEdit) stringResource(R.string.edit_selected_text) else stringResource(R.string.cannot_edit_text)
-                        IconButton(
-                            onClick = { viewModel.onEditText() },
-                            enabled = canEdit,
-                            modifier = Modifier.semantics { contentDescription = editDesc },
+                        val cannotEditText = stringResource(R.string.cannot_edit_text)
+                        val editDesc = if (canEdit) stringResource(R.string.edit_selected_text) else cannotEditText
+                        val scope = rememberCoroutineScope()
+                        // Use a Box to intercept clicks even when "disabled" for non-editable lines
+                        Box(
+                            modifier = Modifier
+                                .semantics { contentDescription = editDesc }
+                                .fillMaxSize(),
                         ) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_edit),
-                                contentDescription = editDesc,
-                                tint = if (canEdit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
-                            )
+                            IconButton(
+                                onClick = {
+                                    if (canEdit) {
+                                        viewModel.onEditText()
+                                    } else {
+                                        // Show snackbar for non-editable line
+                                        scope.launch { snackbarHostState.showSnackbar(cannotEditText) }
+                                    }
+                                },
+                                enabled = true, // Always enabled to intercept clicks
+                                modifier = Modifier.semantics { contentDescription = editDesc },
+                            ) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_edit),
+                                    contentDescription = editDesc,
+                                    tint = if (canEdit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
+                                )
+                            }
                         }
                     }
                 },

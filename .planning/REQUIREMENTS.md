@@ -37,7 +37,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **STATE-01**: All content mutations (text edit, move, delete, image ops) are Command objects on an undo/redo stack, present from the first edit feature onward
 - [x] **STATE-02**: User can undo and redo edits; the page re-renders to reflect stack position
-- [ ] **STATE-03**: Edit session state (open document, selection, undo stack) is held in ViewModel state and survives rotation
+- [x] **STATE-03**: Edit session state (open document, selection, undo stack) is held in ViewModel state and survives rotation
 
 ### IO
 
@@ -124,7 +124,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | EDIT_TEXT-04 | Phase 3 | Complete |
 | STATE-01 | Phase 3 | Complete |
 | STATE-02 | Phase 3 | Complete |
-| STATE-03 | Phase 3 | Pending |
+| STATE-03 | Phase 3 | Complete |
 | FALLBACK-01 | Phase 3 | Complete |
 | FALLBACK-02 | Phase 3 | Complete |
 | UI-01 | Phase 01.1 | Complete |

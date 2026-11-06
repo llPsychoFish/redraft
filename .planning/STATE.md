@@ -4,16 +4,16 @@ milestone: v1.0
 current_phase: 03
 current_phase_name: text-editing-mvp
 status: in_progress
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-11-06T14:18:03.842Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-11-06T16:07:07.051Z"
 last_activity: 2026-11-06
 last_activity_desc: plan 03-01 tracer executed
-state_head: 136a948b3abe3e3724c1ebd6c45b3a391bf94fe1
+state_head: 9fad27d4f64d15d75513ecd8d886ed05db0c487d
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 29
-  completed_plans: 28
+  completed_plans: 29
 milestone_name: milestone
 ---
 
@@ -29,7 +29,7 @@ See: .planning/PROJECT.md (updated 2026-10-16)
 ## Current Position
 
 Phase: 03 — text-editing-mvp (plan 1 of 3 complete)
-Plan: 2 of 3
+Plan: 3 of 3
 Status: Tracer plan (03-01) complete; vertical slice proven
 Last activity: 2026-11-06 — plan 03-01 tracer executed
 
@@ -68,6 +68,7 @@ Progress: [█████████░] 92% - Phases 1, 01.1, 2 complete; Pha
 | Phase 02 Pgap-closure | 1800 | 3 tasks | 4 files |
 | Phase 03 P01 | 4200 | 3 tasks | 27 files |
 | Phase 03-text-editing-mvp P02 | 3600 | 3 tasks | 25 files |
+| Phase 03 P03 | 5400 | 3 tasks | 15 files |
 
 ## Accumulated Context
 
@@ -103,6 +104,18 @@ Recent decisions affecting current work:
 - [Phase 03]: findObjectIndexForCharIndex runs in coroutine (suspend) for JNI calls
 - [Phase 03]: Font cache keyed by Liberation variant name (e.g., LiberationSerifBoldItalic)
 - [Phase 03]: SIL OFL 1.1 license added to AboutScreen open-source notices
+- [Phase 03]: Cross-fade re-render: old bitmap cross-fades to new (200ms FastOutSlowInEasing), no white flash
+- [Phase 03]: Safe reopen: new doc verified (pageCount>0, can render page 0) before closing old doc
+- [Phase 03]: Failure handling: failed save/reopen keeps old doc, emits EditFailed snackbar, editor retains draft, stacks unchanged
+- [Phase 03]: Rotation survival: all edit state (draft, caret, stacks, selection) in ViewModel StateFlows
+- [Phase 03]: Double-tap: hit-test verifies tap on same selected line (blockId or charIndex range) in Edit mode
+- [Phase 03]: Non-editable lines: disabled Edit action with snackbar 'This text can't be edited: vertical or right-to-left text'
+- [Phase 03]: BackHandler precedence: editor → selection → edit mode → viewer (enabled only in Edit mode)
+- [Phase 03]: Targeted cache invalidation: bitmap (all buckets), thumbnail, text layout for edited page only
+- [Phase 03]: Reselection fallback: exact hit-test → nearest line by vertical distance → clear selection
+- [Phase 03]: Command stack rollback on failure: popAndExecute snapshots and restores stacks on exception
+- [Phase 03]: KeyboardOptions: Done action, Sentences capitalization, focusRequester on panel appear
+- [Phase 03]: String resources: all editor strings externalized, no hardcoded text
 
 ### Pending Todos
 
@@ -144,6 +157,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-11-06T14:18:03.573Z
-Stopped at: Completed 03-02-PLAN.md
+Last session: 2026-11-06T16:07:06.780Z
+Stopped at: Completed 03-03-PLAN.md
 Resume file: None

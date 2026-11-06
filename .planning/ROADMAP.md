@@ -178,7 +178,7 @@ Plans:
 
 - [x] 03-01-PLAN.md — Tracer: End-to-end "edit one word" — JNI Path A + Editor UI + re-render + reselection
 - [x] 03-02-PLAN.md — JNI Path B + Font Fallback + Command Stack + Object Matching
-- [ ] 03-03-PLAN.md — Cross-fade + Error Handling + Rotation Survival + UX Polish + Integration Tests
+- [x] 03-03-PLAN.md — Cross-fade + Error Handling + Rotation Survival + UX Polish + Integration Tests
 
 ### Phase 4: Image & Object Editing
 
@@ -231,6 +231,6 @@ Phases execute in numeric order: 1 → 01.1 → 2 → 3 → 4 → 5
 | 1. Foundation & Viewer | 14/14 | Complete    | 2026-10-20 |
 | 01.1. UI, Settings & Release Prep | 8/8 | Complete    | 2026-10-25 |
 | 2. Selection & Hit-Testing | 4/4 | Plans executed — verification gaps remain | - |
-| 3. Text Editing MVP | 2/3 | In Progress | - |
+| 3. Text Editing MVP | 3/3 | In Progress | - |
 | 4. Image & Object Editing | 0/2 | Not started | - |
 | 5. Save & Hardening | 0/2 | Not started | - |

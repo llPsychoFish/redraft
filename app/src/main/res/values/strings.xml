@@ -112,19 +112,22 @@
     <string name="cd_selected_line">Selected line: %s</string>
     <string name="edit_mode">Edit mode</string>
     <string name="no_selectable_text">No selectable text on this page</string>
-    <string name="could_not_read_text">Couldn\'t read this page\'s text</string>
+    <string name="could_not_read_text_v2">Could not read this page's text</string>
+    <string name="m3c_time_picker_hour_suffix">%1$d o'clock</string>
 
     <!-- Editor panel (Phase 3) -->
     <string name="edit_text_title">Edit Text</string>
     <string name="edit_selected_text">Edit selected text</string>
-    <string name="cannot_edit_text">Cannot edit this text</string>
+    <string name="cannot_edit_text">This text cannot be edited: vertical or right-to-left text</string>
     <string name="font_will_change">Font will change to %s</string>
     <string name="text_longer_than_line">Text is longer than the original line</string>
-    <string name="unsupported_char_notice">Character \"%s\" is not supported in bundled fonts</string>
+    <string name="unsupported_char_notice_v2">Unsupported character: %s</string>
     <string name="font_fallback_serif">Liberation Serif</string>
     <string name="font_fallback_sans">Liberation Sans</string>
     <string name="font_fallback_mono">Liberation Mono</string>
     <string name="cd_editing_line">Editing line: %s</string>
     <string name="apply">Apply</string>
     <string name="cancel">Cancel</string>
+    <string name="edit_failed">Edit failed: %s</string>
+    <string name="selection_lost">Selection lost after edit</string>
 </resources>

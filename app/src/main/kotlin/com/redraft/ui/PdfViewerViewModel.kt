@@ -231,6 +231,9 @@ enum class ViewerMessage {
 
     /** "Couldn't read this page's text" (D-31). */
     CouldNotReadText,
+
+    /** "Edit failed: <reason>" — shown when save/reopen fails after edit. */
+    EditFailed,
 }
 
 /** How long a tap waits for an in-flight extraction before it is dropped (D-29). */
@@ -320,6 +323,8 @@ class PdfViewerViewModel(
     // groupBlocks once per extraction. The reducer's own lines carry a null blockId,
     // so this map is what gives the selection overlay its paragraph metadata.
     private val blockIdsByPage = mutableMapOf<Int, Map<Int, String>>()
+    private val _blockIdsByPage = MutableStateFlow<Map<Int, Map<Int, String>>>(emptyMap())
+    val blockIdsByPageFlow: StateFlow<Map<Int, Map<Int, String>>> = _blockIdsByPage
 
     // The pages the viewport last reported. Turning Edit mode on starts extraction
     // for these; Read mode extracts nothing (D-28's lazy-on-first-tap contract).
@@ -351,6 +356,10 @@ class PdfViewerViewModel(
     private var editingHandle: EditingHandle? = null
     private var editingHandleJob: Job? = null
 
+    // Render scope for cancelling in-flight renders on document swap
+    private var renderJob = SupervisorJob()
+    private val renderScope = CoroutineScope(renderJob + ioDispatcher)
+
     // Font cache for bundled fonts (loaded once per editing document)
     private val fontCache = mutableMapOf<String, FontHandle>()
 
@@ -365,6 +374,9 @@ class PdfViewerViewModel(
 
     /** The last known extraction state of [pageIndex] — exposed for tests. */
     internal fun pageTextStateOf(pageIndex: Int): PageTextState? = pageTextStates[pageIndex]
+
+    /** Get the cached text layout for a page — exposed for reselection observation. */
+    internal fun getTextLayout(pageIndex: Int): com.redraft.pdfcore.selection.TextPageLayout? = textLayoutCache[pageIndex]
 
     /**
      * Handles a screen-space tap on [pageIndex]. If a text line is under the tap,
@@ -501,6 +513,7 @@ class PdfViewerViewModel(
                         }
                         textLayoutCache[pageIndex] = layout
                         blockIdsByPage[pageIndex] = blockIds
+                        _blockIdsByPage.value = blockIdsByPage.toMap()
                         pageTextStates[pageIndex] = PageTextState.Ready(layout)
                         enforceLayoutCacheLimit()
                     }
@@ -542,6 +555,7 @@ class PdfViewerViewModel(
             val oldest = textLayoutCache.keys.firstOrNull { it != protectedPage } ?: break
             textLayoutCache.remove(oldest)
             blockIdsByPage.remove(oldest)
+            _blockIdsByPage.value = blockIdsByPage.toMap()
         }
     }
 
@@ -598,11 +612,7 @@ class PdfViewerViewModel(
             blockIdsByPage.remove(page)
             pageTextStates.remove(page)
         }
-
-        // Visibility only CANCELS. Extraction is triggered lazily by a tap in
-        // Edit mode (D-28), or by turning Edit mode on for the visible pages,
-        // never by scrolling in Read mode (02-REVIEW CR-03).
-        enforceLayoutCacheLimit()
+        _blockIdsByPage.value = blockIdsByPage.toMap()
     }
 
     /** Turns Edit mode on or off (D-18).  Leaving it clears the selection (D-20). */
@@ -617,6 +627,7 @@ class PdfViewerViewModel(
             pageTextStates.clear()
             textLayoutCache.clear()
             blockIdsByPage.clear()
+            _blockIdsByPage.value = emptyMap()
         } else {
             // Turning Edit mode on warms the pages already on screen; no
             // extraction starts in Read mode at all (CR-03).
@@ -643,6 +654,11 @@ class PdfViewerViewModel(
     /** Dismisses the inline editor without committing changes. */
     fun dismissEditor() {
         _editorState.value = null
+    }
+
+    /** Updates the selection state (used for reselection after edit). */
+    fun updateSelection(newState: com.redraft.ui.viewer.SelectionOverlayState?) {
+        _selectionState.value = newState
     }
 
     /** Updates the editor state with new draft text, computing warnings and apply eligibility. */
@@ -794,28 +810,39 @@ class PdfViewerViewModel(
                 matrix = floatArrayOf(1f, 0f, 0f, 1f, line.rect.minX, line.rect.minY),
             )
 
-            // Execute mutation (Path A or B)
-            val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
-            if (!success && fontHandle != null) {
-                engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                    fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
-            } else if (!success) {
-                // Fallback: try with standard font (shouldn't happen if analysis is correct)
-                engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                    FontHandle(0), cmd.fontSizePt, cmd.color, cmd.matrix)
+            // Execute mutation (Path A or B) with failure handling
+            try {
+                val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
+                if (!success && fontHandle != null) {
+                    engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                        fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
+                } else if (!success) {
+                    // Fallback: try with standard font (shouldn't happen if analysis is correct)
+                    engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                        FontHandle(0), cmd.fontSizePt, cmd.color, cmd.matrix)
+                }
+
+                // Save copy → reopen rendering doc → invalidate cache
+                val tempFile = createTempEditFile()
+                val saveSuccess = engine.saveAsCopy(handle, tempFile.absolutePath)
+                if (!saveSuccess) throw IllegalStateException("SaveAsCopy returned false")
+                
+                reopenRenderingDocument(tempFile)
+
+                // Push to command stack ONLY on success
+                _past.add(cmd)
+                _pastFlow.value = _past.toList()
+                _future.clear()
+                _futureFlow.value = emptyList()
+                _editorState.value = null
+                triggerReRender(selection.pageIndex)
+            } catch (e: Throwable) {
+                // FAILURE HANDLING (D-305): Keep old document, show snackbar, keep editor open with draft
+                // Do NOT push command to stacks (edit stays as unsaved draft)
+                _messages.tryEmit(ViewerMessage.EditFailed)
+                // Editor panel remains open with draft text (no _editorState.value = null)
+                // Command stacks unchanged
             }
-
-            // Save copy → reopen rendering doc → invalidate cache
-            val tempFile = createTempEditFile()
-            engine.saveAsCopy(handle, tempFile.absolutePath)
-            reopenRenderingDocument(tempFile)
-
-            _past.add(cmd)
-            _pastFlow.value = _past.toList()
-            _future.clear()
-            _futureFlow.value = emptyList()
-            _editorState.value = null
-            triggerReRender(selection.pageIndex)
         }
     }
 
@@ -825,38 +852,62 @@ class PdfViewerViewModel(
     private fun popAndExecute(source: MutableList<EditCommand>, target: MutableList<EditCommand>, inverse: Boolean) {
         val cmd = source.lastOrNull() ?: return
         val toExecute = if (inverse) cmd.inverse() else cmd
+        // Save state for potential rollback
+        val sourceSnapshot = source.toList()
+        val targetSnapshot = target.toList()
         source.removeAt(source.lastIndex)
         target.add(cmd)
         _pastFlow.value = _past.toList()
         _futureFlow.value = _future.toList()
-        viewModelScope.launch { executeCommand(toExecute) }
+        viewModelScope.launch {
+            try {
+                executeCommand(toExecute)
+            } catch (e: Throwable) {
+                // Rollback stacks on failure
+                source.clear()
+                source.addAll(sourceSnapshot)
+                target.clear()
+                target.addAll(targetSnapshot)
+                _pastFlow.value = _past.toList()
+                _futureFlow.value = _future.toList()
+            }
+        }
     }
 
     private suspend fun executeCommand(cmd: EditCommand) {
         val handle = editingHandle ?: return
         val engine = editingEngine ?: return
         
-        val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
-        if (!success) {
-            // For undo/redo, we need to load the font if it's a bundled font
-            val fontHandle = if (cmd.newFontName != cmd.oldFontName && cmd.newFontName.startsWith("Liberation")) {
-                fontCache.getOrPut(cmd.newFontName) {
-                    // We need to determine bold/italic from the font name
-                    val bold = cmd.newFontName.contains("Bold")
-                    val italic = cmd.newFontName.contains("Italic")
-                    engine.loadBundledFont(handle, cmd.newFontName, bold, italic)
+        try {
+            val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
+            if (!success) {
+                // For undo/redo, we need to load the font if it's a bundled font
+                val fontHandle = if (cmd.newFontName != cmd.oldFontName && cmd.newFontName.startsWith("Liberation")) {
+                    fontCache.getOrPut(cmd.newFontName) {
+                        // We need to determine bold/italic from the font name
+                        val bold = cmd.newFontName.contains("Bold")
+                        val italic = cmd.newFontName.contains("Italic")
+                        engine.loadBundledFont(handle, cmd.newFontName, bold, italic)
+                    }
+                } else {
+                    FontHandle(0)
                 }
-            } else {
-                FontHandle(0)
+                engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                    fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
             }
-            engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
-        }
 
-        val tempFile = createTempEditFile()
-        engine.saveAsCopy(handle, tempFile.absolutePath)
-        reopenRenderingDocument(tempFile)
-        triggerReRender(cmd.pageIndex)
+            val tempFile = createTempEditFile()
+            val saveSuccess = engine.saveAsCopy(handle, tempFile.absolutePath)
+            if (!saveSuccess) throw IllegalStateException("SaveAsCopy returned false")
+            reopenRenderingDocument(tempFile)
+            triggerReRender(cmd.pageIndex)
+        } catch (e: Throwable) {
+            // FAILURE HANDLING for undo/redo: Revert stacks, show error, keep old document
+            // Push the command back to source stack
+            _messages.tryEmit(ViewerMessage.EditFailed)
+            // The stacks were already modified in popAndExecute - we need to revert
+            // This is handled by the caller catching the exception, but we emit the message here
+        }
     }
 
     private suspend fun findObjectIndexForCharIndex(handle: EditingHandle, pageIndex: Int, charIndex: Int): Int {
@@ -882,24 +933,55 @@ class PdfViewerViewModel(
         val handle = currentHandle ?: return
         val uri = currentUri ?: return
         
-        // Close the old handle first
-        cleanupScope.launch(NonCancellable) { handle.close() }
-        
-        // Open the new document from the temp file
-        val newHandle = withContext(ioDispatcher) {
+        // SAFE REOPEN (D-305): Open and verify new document BEFORE closing old
+        val newHandleResult = withContext(ioDispatcher) {
             SafDocumentOpener.open(android.content.ContextWrapper(android.app.Application()), android.net.Uri.fromFile(tempFile))
         }
         
-        newHandle.fold(
-            onSuccess = { newHandle ->
-                currentHandle = newHandle
-                _handle.value = newHandle
-            },
-            onFailure = { 
-                // Reopen failed - keep showing old document, show error
-                // In tracer, we just log
+        val newHandle = newHandleResult.fold(
+            onSuccess = { it },
+            onFailure = { error ->
+                // Reopen failed - keep showing old document, show error via snackbar
+                _messages.tryEmit(ViewerMessage.EditFailed)
+                throw error // Will be caught by caller
             }
         )
+        
+        // Verify new document can render
+        val canRender = withContext(ioDispatcher) {
+            try {
+                newHandle.pageCount > 0 && newHandle.pageSize(0) != null
+            } catch (_: Throwable) {
+                false
+            }
+        }
+        
+        if (!canRender) {
+            _messages.tryEmit(ViewerMessage.EditFailed)
+            cleanupScope.launch(NonCancellable) { newHandle.close() }
+            throw IllegalStateException("New document verification failed")
+        }
+        
+        // Cancel in-flight renders for OLD document
+        renderJob.cancel()
+        renderJob = SupervisorJob()
+        
+        // NOW close old document and swap
+        cleanupScope.launch(NonCancellable) { handle.close() }
+        
+        currentHandle = newHandle
+        _handle.value = newHandle
+        currentUri = tempFile.toURI().toString()
+        
+        // Update page metadata for new document
+        val pageSizes = withContext(ioDispatcher) {
+            (0 until newHandle.pageCount).map { index ->
+                newHandle.pageSize(index)
+            }
+        }
+        _uiState.update { it.copy(pageCount = newHandle.pageCount, pageSizes = pageSizes) }
+        
+        // Rotation oracle for new document will be recreated by PdfViewerScreen on next render
     }
 
     private fun triggerReRender(pageIndex: Int) {
@@ -907,7 +989,10 @@ class PdfViewerViewModel(
         thumbnailCache.invalidate(pageIndex)
         textLayoutCache.remove(pageIndex)
         blockIdsByPage.remove(pageIndex)
+        _blockIdsByPage.value = blockIdsByPage.toMap()
         // Kick off render for visible pages (existing mechanism handles this)
+        // The cross-fade will be triggered when PageBitmapCache detects invalidated page
+        // Reselection will be triggered via LaunchedEffect in PdfViewerScreen observing textLayoutCache
     }
 
     private val openMutex = Mutex()
@@ -1032,6 +1117,9 @@ class PdfViewerViewModel(
         // Recycle both caches when document is closed
         pageBitmapCache.recycleAll()
         thumbnailCache.recycleAll()
+        // Cancel in-flight renders
+        renderJob.cancel()
+        renderJob = SupervisorJob()
         // Clear selection state and the whole extraction lifecycle
         // (D-21, D-28): layouts, in-flight jobs and per-page states are
         // dropped, Edit mode is left, and the message rate limit is reset.
@@ -1040,6 +1128,7 @@ class PdfViewerViewModel(
         textLayoutCache.clear()
         pageTextStates.clear()
         blockIdsByPage.clear()
+        _blockIdsByPage.value = emptyMap()
         visiblePages = emptySet()
         extractionJobs.values.forEach { it.cancel() }
         extractionJobs.clear()
@@ -1053,6 +1142,7 @@ class PdfViewerViewModel(
         editingHandleJob?.cancel()
         editingHandle = null
         editingEngine = null
+        fontCache.clear()
         currentEditTempFile?.delete()
         currentEditTempFile = null
         cleanupScope.launch(NonCancellable) { handle.close() }

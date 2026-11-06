@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -53,14 +54,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
 import com.redraft.pdfcore.PdfPageGeometry
 import com.redraft.pdfcore.PdfPoint
+import com.redraft.pdfcore.PdfRect
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.ViewportState
+import com.redraft.pdfcore.selection.TextPageLayout
 import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.viewer.SelectionOverlay
 import com.redraft.ui.viewer.SelectionOverlayState
+import com.redraft.ui.viewer.reselectEditedLine
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -150,6 +154,54 @@ fun PdfViewerScreen(
             }
         }
 
+        // RESELECTION AFTER EDIT (D-305): When text layout for the selected page changes
+        // after an edit commit, reselect the edited line at the same position.
+        val selection = selectionState
+        val blockIdsByPageFlow = viewModel.blockIdsByPageFlow
+        LaunchedEffect(selection, editMode) {
+            if (selection == null || !editMode) return@LaunchedEffect
+            val pageIndex = selection.pageIndex
+            val baselineRect = selection.selectedLine?.rect ?: return@LaunchedEffect
+            val tolerance = TapTolerance(horizontalPx = 8f, minLineHeightPx = 32f)
+            
+            // Observe blockIds changes for the selected page - this signals layout is ready
+            snapshotFlow { blockIdsByPageFlow.value[pageIndex] }
+                .distinctUntilChanged()
+                .collect { blockIds: Map<Int, String>? ->
+                    // Also check that the layout is actually available
+                    val newLayout = viewModel.getTextLayout(pageIndex)
+                    newLayout?.let {
+                        val viewport = ViewportState(uiState.zoom, uiState.panX, 0f)
+                        val pageSize = uiState.pageSizes.firstOrNull { it.pageIndex == pageIndex }
+                        val transform = pageSize?.let {
+                            val base = it.slotBaseSizePx(viewportWidthPx)
+                            PdfViewportTransform(
+                                pageWidthPt = it.widthPt,
+                                pageHeightPt = it.heightPt,
+                                rotationDegrees = it.rotationDegrees,
+                                renderedWidthPx = base.widthPx,
+                                renderedHeightPx = base.heightPx,
+                                cropOriginX = it.cropBox.minX,
+                                cropOriginY = it.cropBox.minY,
+                            )
+                        } ?: return@collect
+                        
+                        reselectEditedLine(
+                            pageIndex = pageIndex,
+                            baselineRect = baselineRect,
+                            newLayout = newLayout,
+                            viewport = viewport,
+                            transform = transform,
+                            tolerance = tolerance,
+                            blockIdsByPage = blockIds,
+                            onSelectionChange = { newState ->
+                                viewModel.updateSelection(newState)
+                            }
+                        )
+                    }
+                }
+        }
+
         if (uiState.pageCount == 0) {
             Box(
                 contentAlignment = Alignment.Center,
@@ -204,6 +256,7 @@ fun PdfViewerScreen(
                         selectionState = selectionState,
                         tapTolerance = tapTolerance,
                         editMode = editMode,
+                        viewModel = viewModel,
                         onTap = { tapScreen, pageIdx, viewport, transform, tolerance ->
                             viewModel.onTap(tapScreen, pageIdx, viewport, transform, tolerance)
                         },
@@ -426,6 +479,7 @@ private fun PdfPageItem(
     selectionState: SelectionOverlayState?,
     tapTolerance: TapTolerance,
     editMode: Boolean,
+    viewModel: PdfViewerViewModel,
     onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform, TapTolerance) -> Unit,
     onDoubleTapSelectedLine: () -> Unit,
     modifier: Modifier = Modifier,
@@ -659,11 +713,28 @@ private fun PdfPageItem(
                                 // "tap selects nothing / adjacent line" on-device defect.
                                 // Check for double-tap on already-selected line (D-301-shortcut)
                                 val isSelectedPage = selectionState?.pageIndex == pageIndex
-                                val isSelectedLine = selectionState?.selectedLine?.let { it.chars.first().index }?.let { firstIdx ->
-                                    // For simplicity: if tap lands on same line as selection, treat as edit shortcut
-                                    // Actual logic would use charIndex match from hitTest
-                                    true // placeholder; actual logic uses charIndex match
-                                } ?: false
+                                val isSelectedLine = if (isSelectedPage && editMode) {
+                                    // Perform hit test at tap position to check if it's the same line
+                                    val layout = viewModel.getTextLayout(pageIndex)
+                                    layout?.let { textLayout ->
+                                        val hitResult = com.redraft.pdfcore.selection.hitTest(
+                                            com.redraft.pdfcore.PdfPoint(upPosition.x, upPosition.y),
+                                            textLayout,
+                                            latestViewport.value,
+                                            latestTransform.value,
+                                            latestTolerance.value,
+                                        )
+                                        hitResult?.let { result ->
+                                            // Check if hit line matches selected line by blockId or charIndex range
+                                            val selectedLine = selectionState?.selectedLine
+                                            selectedLine != null && (
+                                                (result.line.blockId != null && result.line.blockId == selectedLine.blockId) ||
+                                                (result.line.firstCharIndex <= selectedLine.chars.last().index &&
+                                                 result.line.chars.last().index >= selectedLine.chars.first().index)
+                                            )
+                                        } ?: false
+                                    } ?: false
+                                } else false
 
                                 if (isSelectedPage && isSelectedLine && editMode) {
                                     onDoubleTapSelectedLine()

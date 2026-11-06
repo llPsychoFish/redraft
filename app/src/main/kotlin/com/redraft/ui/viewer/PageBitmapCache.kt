@@ -62,6 +62,9 @@ class PageBitmapCache(
     /** Bitmaps nothing references any more, waiting to be freed safely. */
     private val pendingRecycle = LinkedHashSet<Bitmap>()
 
+    /** Pages that have been invalidated and need cross-fade on next render. */
+    private val invalidatedPages = mutableSetOf<Int>()
+
     private var recycled = 0
     private var recycleScheduled = false
     private var framesToWait = 0
@@ -157,11 +160,12 @@ class PageBitmapCache(
                 // Ignore unmocked android.util.LruCache in JVM unit tests
             }
         }
+        invalidatedPages.clear()
     }
 
     /**
      * Invalidates all cached bitmaps for [pageIndex] across all zoom buckets.
-     * Also removes thumbnail and text layout cache entries for the page.
+     * Marks the page for cross-fade on next render.
      * Called after an edit commits and the rendering document is reopened.
      */
     fun invalidatePage(pageIndex: Int) {
@@ -175,8 +179,18 @@ class PageBitmapCache(
                 }
                 lru.remove(key)
             }
+            invalidatedPages.add(pageIndex)
         }
-        // Also notify ThumbnailCache and text layout cache (via ViewModel)
+    }
+
+    /**
+     * Checks if a page was invalidated and needs cross-fade.
+     * Clears the flag after checking.
+     */
+    fun checkAndClearInvalidated(pageIndex: Int): Boolean {
+        synchronized(lru) {
+            return invalidatedPages.remove(pageIndex)
+        }
     }
 
     /**

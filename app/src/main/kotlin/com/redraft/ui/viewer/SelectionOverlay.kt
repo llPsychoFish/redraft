@@ -185,6 +185,7 @@ fun reselectEditedLine(
     viewport: ViewportState,
     transform: PdfViewportTransform,
     tolerance: TapTolerance,
+    blockIdsByPage: Map<Int, String>?,
     onSelectionChange: (SelectionOverlayState?) -> Unit,
 ) {
     // Convert baselineRect center (PDF coords) to screen
@@ -198,12 +199,36 @@ fun reselectEditedLine(
     // hitTest expects screen coordinates as PdfPoint (parameter name is misleading)
     val tapScreenAsPdfPoint = com.redraft.pdfcore.PdfPoint(tapScreen.x, tapScreen.y)
     val result = hitTest(tapScreenAsPdfPoint, newLayout, viewport, transform, tolerance)
-    onSelectionChange(result?.let {
-        SelectionOverlayState(
-            selectedLine = it.line,
-            blockId = it.line.blockId ?: it.line.blockId,
-            editable = it.line.fragment.editable,
-            pageIndex = pageIndex,
+    if (result != null) {
+        onSelectionChange(
+            SelectionOverlayState(
+                selectedLine = result.line,
+                blockId = result.line.blockId ?: blockIdsByPage?.get(result.line.firstCharIndex),
+                editable = result.line.fragment.editable,
+                pageIndex = pageIndex,
+            )
         )
-    })
+        return
+    }
+    
+    // FALLBACK: No exact hit - find nearest line by vertical distance to baselineRect center
+    val nearestLine = newLayout.reducedLines.minByOrNull { line ->
+        val lineCenterY = (line.rect.minY + line.rect.maxY) * 0.5f
+        abs(lineCenterY - centerPdf.y)
+    }
+    
+    if (nearestLine != null) {
+        onSelectionChange(
+            SelectionOverlayState(
+                selectedLine = nearestLine,
+                blockId = nearestLine.blockId ?: blockIdsByPage?.get(nearestLine.firstCharIndex),
+                editable = nearestLine.fragment.editable,
+                pageIndex = pageIndex,
+            )
+        )
+        return
+    }
+    
+    // No lines at all - clear selection
+    onSelectionChange(null)
 }
