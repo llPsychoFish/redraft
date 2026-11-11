@@ -79,11 +79,20 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
 
     override suspend fun open(uri: Uri, pfd: ParcelFileDescriptor): Result<EditingHandle> = withContext(Dispatchers.IO) {
         try {
-            val handle = nativeOpen(uri.toString(), pfd, pfd.statSize, 0)
-            if (handle == 0L) {
-                Result.failure(IllegalStateException("PDFium could not open the document for editing"))
+            // Argument order is (offset, length). The offset is always 0: the
+            // descriptor points at the start of the PDF. Passing the size as the
+            // offset left the editing document unopened, so Apply silently did
+            // nothing on every document.
+            val length = pfd.statSize
+            if (length <= 0L) {
+                Result.failure(IllegalStateException("The document size is unknown"))
             } else {
-                Result.success(EditingHandle(handle))
+                val handle = nativeOpen(uri.toString(), pfd, 0L, length)
+                if (handle == 0L) {
+                    Result.failure(IllegalStateException("PDFium could not open the document for editing"))
+                } else {
+                    Result.success(EditingHandle(handle))
+                }
             }
         } catch (e: Throwable) {
             Result.failure(e)
