@@ -27,8 +27,8 @@ JNIEXPORT jboolean JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeSetText(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex, jstring newText);
 
-// 4. Replace text object (Path B) — void, throws on failure
-JNIEXPORT void JNICALL
+// 4. Replace text object (Path B) — returns TRUE on success
+JNIEXPORT jboolean JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeReplaceTextObject(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex,
     jstring newText, jlong fontHandle, jfloat fontSizePt, jint color, jfloatArray matrix);

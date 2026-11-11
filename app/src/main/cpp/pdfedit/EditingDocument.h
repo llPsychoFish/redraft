@@ -18,6 +18,10 @@ public:
     EditingDocument& operator=(const EditingDocument&) = delete;
 
 private:
+    // FPDF_FILEACCESS callback: reads |size| bytes at |pos| of the opened file.
+    static int ReadBlock(void* param, unsigned long pos,
+                         unsigned char* buffer, unsigned long size);
+
     FPDF_DOCUMENT doc_ = nullptr;
     int fd_ = -1;
     long offset_ = 0;

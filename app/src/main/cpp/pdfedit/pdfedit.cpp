@@ -4,140 +4,207 @@
 #include "TextMutation.h"
 #include "FontLoading.h"
 #include "Save.h"
+
+#include <android/log.h>
+#include <unistd.h>
 #include <string>
+#include <vector>
 
-// Handle types (opaque pointers)
+#define LOG_TAG "RedraftNative"
+#define LOG_W(...) __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
+
 using EditingHandle = EditingDocument*;
-using FontHandle = FPDF_FONT;
 
-// Helper: UTF-8 to UTF-16LE conversion
-static std::u16string utf8ToUtf16(const char* utf8) {
-    // JNI GetStringUTFChars returns modified UTF-8, but we need standard UTF-8 to UTF-16
-    // For simplicity, we assume ASCII-compatible input (which is the case for our use)
-    std::u16string result;
-    const unsigned char* p = reinterpret_cast<const unsigned char*>(utf8);
-    while (*p) {
-        unsigned int cp = *p++;
-        if (cp < 0x80) {
-            result.push_back(static_cast<char16_t>(cp));
-        } else if ((cp & 0xE0) == 0xC0) {
-            // 2-byte sequence
-            unsigned int cp2 = *p++ & 0x3F;
-            result.push_back(static_cast<char16_t>(((cp & 0x1F) << 6) | cp2));
-        } else if ((cp & 0xF0) == 0xE0) {
-            // 3-byte sequence
-            unsigned int cp2 = *p++ & 0x3F;
-            unsigned int cp3 = *p++ & 0x3F;
-            result.push_back(static_cast<char16_t>(((cp & 0x0F) << 12) | (cp2 << 6) | cp3));
-        } else if ((cp & 0xF8) == 0xF0) {
-            // 4-byte sequence (surrogate pair needed for UTF-16)
-            unsigned int cp2 = *p++ & 0x3F;
-            unsigned int cp3 = *p++ & 0x3F;
-            unsigned int cp4 = *p++ & 0x3F;
-            unsigned int codepoint = ((cp & 0x07) << 18) | (cp2 << 12) | (cp3 << 6) | cp4;
-            if (codepoint > 0xFFFF) {
-                codepoint -= 0x10000;
-                result.push_back(static_cast<char16_t>(0xD800 | (codepoint >> 10)));
-                result.push_back(static_cast<char16_t>(0xDC00 | (codepoint & 0x3FF)));
-            } else {
-                result.push_back(static_cast<char16_t>(codepoint));
-            }
-        }
-    }
+// JNI strings are UTF-16; take them as such instead of re-parsing modified UTF-8.
+static std::u16string jstringToUtf16(JNIEnv* env, jstring value) {
+    if (!value) return {};
+    const jchar* chars = env->GetStringChars(value, nullptr);
+    if (!chars) return {};
+    const jsize length = env->GetStringLength(value);
+    std::u16string result(reinterpret_cast<const char16_t*>(chars),
+                          static_cast<size_t>(length));
+    env->ReleaseStringChars(value, chars);
     return result;
 }
 
-// 1. Open editing document from file URI (SAF file descriptor)
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeOpen(
-    JNIEnv* env, jclass, jstring uri, jobject fd, jlong offset, jlong length) {
-    const char* uriStr = env->GetStringUTFChars(uri, nullptr);
-    // Duplicate FD for our own use
-    int dupFd = dup(env->GetDirectBufferAddress(fd));
-    EditingDocument* doc = new EditingDocument(dupFd, offset, length);
-    env->ReleaseStringUTFChars(uri, uriStr);
-    return reinterpret_cast<jlong>(doc);
+    JNIEnv* env, jclass, jstring, jobject fd, jlong offset, jlong length) {
+    try {
+        if (!fd) return 0;
+        jclass cls = env->GetObjectClass(fd);
+        if (!cls) return 0;
+        jmethodID getFd = env->GetMethodID(cls, "getFd", "()I");
+        if (!getFd) return 0;
+
+        const jint rawFd = env->CallIntMethod(fd, getFd);
+        if (env->ExceptionCheck()) {
+            env->ExceptionClear();
+            return 0;
+        }
+        if (rawFd < 0) return 0;
+
+        auto* document = new EditingDocument(static_cast<int>(rawFd),
+                                             static_cast<long>(offset),
+                                             static_cast<long>(length));
+        if (!document->docPtr()) {
+            LOG_W("FPDF_LoadCustomDocument failed (error %lu)", FPDF_GetLastError());
+            delete document;
+            return 0;
+        }
+        return reinterpret_cast<jlong>(document);
+    } catch (...) {
+        LOG_W("nativeOpen threw");
+        return 0;
+    }
 }
 
-// 2. Close editing document
 extern "C" JNIEXPORT void JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeClose(
     JNIEnv*, jclass, jlong handle) {
-    delete reinterpret_cast<EditingHandle>(handle);
+    try {
+        delete reinterpret_cast<EditingHandle>(handle);
+    } catch (...) {
+        LOG_W("nativeClose threw");
+    }
 }
 
-// 3. Try in-place text set (Path A)
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeSetText(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex, jstring newText) {
-    EditingHandle doc = reinterpret_cast<EditingHandle>(handle);
-    const char* text = env->GetStringUTFChars(newText, nullptr);
-    // Convert UTF-8 to UTF-16LE for FPDFText_SetText (expects FPDF_WIDESTRING)
-    std::u16string wideText = utf8ToUtf16(text);
-    bool success = TextMutation::setText(doc, pageIndex, objectIndex, wideText);
-    env->ReleaseStringUTFChars(newText, text);
-    return success;
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return JNI_FALSE;
+        const std::u16string text = jstringToUtf16(env, newText);
+        return TextMutation::setText(document, pageIndex, objectIndex, text)
+                   ? JNI_TRUE : JNI_FALSE;
+    } catch (...) {
+        LOG_W("nativeSetText threw");
+        return JNI_FALSE;
+    }
 }
 
-// 4. Replace text object (Path B)
-extern "C" JNIEXPORT void JNICALL
+extern "C" JNIEXPORT jboolean JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeReplaceTextObject(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex,
     jstring newText, jlong fontHandle, jfloat fontSizePt, jint color, jfloatArray matrix) {
-    EditingHandle doc = reinterpret_cast<EditingHandle>(handle);
-    const char* text = env->GetStringUTFChars(newText, nullptr);
-    std::u16string wideText = utf8ToUtf16(text);
-    jfloat* matrixArr = env->GetFloatArrayElements(matrix, nullptr);
-    FPDF_FONT font = reinterpret_cast<FPDF_FONT>(fontHandle);
-    TextMutation::replaceTextObject(doc, pageIndex, objectIndex, wideText,
-        font, fontSizePt, color, matrixArr);
-    env->ReleaseStringUTFChars(newText, text);
-    env->ReleaseFloatArrayElements(matrix, matrixArr, 0);
+    jfloat* matrixValues = nullptr;
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return JNI_FALSE;
+
+        const std::u16string text = jstringToUtf16(env, newText);
+        if (matrix) {
+            matrixValues = env->GetFloatArrayElements(matrix, nullptr);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                matrixValues = nullptr;
+            }
+        }
+
+        const bool ok = TextMutation::replaceTextObject(
+            document, pageIndex, objectIndex, text,
+            reinterpret_cast<FPDF_FONT>(fontHandle),
+            static_cast<float>(fontSizePt), static_cast<int>(color), matrixValues);
+
+        if (matrixValues) {
+            env->ReleaseFloatArrayElements(matrix, matrixValues, JNI_ABORT);
+        }
+        return ok ? JNI_TRUE : JNI_FALSE;
+    } catch (...) {
+        if (matrixValues) {
+            env->ReleaseFloatArrayElements(matrix, matrixValues, JNI_ABORT);
+        }
+        LOG_W("nativeReplaceTextObject threw");
+        return JNI_FALSE;
+    }
 }
 
-// 5. Save as copy to temp file
 extern "C" JNIEXPORT jboolean JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeSaveAsCopy(
     JNIEnv* env, jclass, jlong handle, jstring destPath) {
-    EditingHandle doc = reinterpret_cast<EditingHandle>(handle);
-    const char* path = env->GetStringUTFChars(destPath, nullptr);
-    bool success = Save::saveAsCopy(doc, path);
-    env->ReleaseStringUTFChars(destPath, path);
-    return success;
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document || !destPath) return JNI_FALSE;
+        const char* path = env->GetStringUTFChars(destPath, nullptr);
+        if (!path) return JNI_FALSE;
+        const bool ok = Save::saveAsCopy(document, path);
+        env->ReleaseStringUTFChars(destPath, path);
+        return ok ? JNI_TRUE : JNI_FALSE;
+    } catch (...) {
+        LOG_W("nativeSaveAsCopy threw");
+        return JNI_FALSE;
+    }
 }
 
-// 6. Load bundled font from asset byte array
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeLoadBundledFont(
-    JNIEnv* env, jclass, jlong handle, jstring fontName, jboolean bold, jboolean italic, jbyteArray fontData) {
-    EditingHandle doc = reinterpret_cast<EditingHandle>(handle);
-    const char* name = env->GetStringUTFChars(fontName, nullptr);
-    
-    // Get byte array data
-    jsize length = env->GetArrayLength(fontData);
-    jbyte* data = env->GetByteArrayElements(fontData, nullptr);
-    std::vector<uint8_t> buffer(length);
-    memcpy(buffer.data(), data, length);
-    env->ReleaseByteArrayElements(fontData, data, JNI_ABORT);
-    
-    std::u16string wideName = utf8ToUtf16(name);
-    FPDF_FONT font = FontLoading::loadBundledFontFromBuffer(doc, wideName, buffer);
-    env->ReleaseStringUTFChars(fontName, name);
-    return reinterpret_cast<jlong>(font);
+    JNIEnv* env, jclass, jlong handle, jstring fontName, jboolean, jboolean, jbyteArray fontData) {
+    jbyte* data = nullptr;
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document || !fontData) return 0;
+
+        const jsize length = env->GetArrayLength(fontData);
+        if (length <= 0) return 0;
+        data = env->GetByteArrayElements(fontData, nullptr);
+        if (!data) return 0;
+
+        std::vector<uint8_t> buffer(static_cast<size_t>(length));
+        memcpy(buffer.data(), data, static_cast<size_t>(length));
+        env->ReleaseByteArrayElements(fontData, data, JNI_ABORT);
+        data = nullptr;
+
+        const std::u16string name = jstringToUtf16(env, fontName);
+        FPDF_FONT font = FontLoading::loadBundledFontFromBuffer(document, name, buffer);
+        if (!font) {
+            LOG_W("FPDFText_LoadFont failed");
+            return 0;
+        }
+        return reinterpret_cast<jlong>(font);
+    } catch (...) {
+        if (data) env->ReleaseByteArrayElements(fontData, data, JNI_ABORT);
+        LOG_W("nativeLoadBundledFont threw");
+        return 0;
+    }
 }
 
-// 7. Get text object count for a page (for matching)
 extern "C" JNIEXPORT jint JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeGetTextObjectCount(
     JNIEnv*, jclass, jlong handle, jint pageIndex) {
-    EditingHandle doc = reinterpret_cast<EditingHandle>(handle);
-    return TextMutation::getTextObjectCount(doc, pageIndex);
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return 0;
+        return TextMutation::getTextObjectCount(document, pageIndex);
+    } catch (...) {
+        return 0;
+    }
 }
 
-// 8. Get char count for a text object (for matching)
 extern "C" JNIEXPORT jint JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngine_nativeGetTextObjectCharCount(
     JNIEnv*, jclass, jlong handle, jint pageIndex, jint objectIndex) {
-    EditingHandle doc = reinterpret_cast<EditingHandle>(handle);
-    return TextMutation::getTextObjectCharCount(doc, pageIndex, objectIndex);
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return 0;
+        return TextMutation::getTextObjectCharCount(document, pageIndex, objectIndex);
+    } catch (...) {
+        return 0;
+    }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_redraft_pdfedit_PdfEditingEngine_nativeFindTextObject(
+    JNIEnv* env, jclass, jlong handle, jint pageIndex,
+    jfloat left, jfloat top, jfloat right, jfloat bottom, jstring text) {
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return -1;
+        const std::u16string wanted = jstringToUtf16(env, text);
+        return TextMutation::findTextObject(document, pageIndex,
+                                            left, top, right, bottom, wanted);
+    } catch (...) {
+        LOG_W("nativeFindTextObject threw");
+        return -1;
+    }
 }

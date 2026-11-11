@@ -1,22 +1,17 @@
 #include "EditingDocument.h"
-#include <fpdfview.h>
+
 #include <unistd.h>
 
 EditingDocument::EditingDocument(int fd, long offset, long length)
     : fd_(dup(fd)), offset_(offset), length_(length) {
-    // Use FPDF_LoadCustomDocument with a file-accessor that reads from the FD
-    // at the given offset/length. This avoids copying the whole PDF to memory.
-    FPDF_FILEACCESS fileAccess = {0};
-    fileAccess.m_FileLen = length_;
-    fileAccess.m_GetBlock = [](void* param, unsigned long pos,
-                               unsigned char* buf, unsigned long size) -> int {
-        int fd = *static_cast<int*>(param);
-        off_t seekPos = lseek(fd, pos, SEEK_SET);
-        if (seekPos == -1) return 0;
-        ssize_t readBytes = read(fd, buf, size);
-        return readBytes == static_cast<ssize_t>(size) ? 1 : 0;
-    };
-    fileAccess.m_Param = &fd_;
+    if (fd_ < 0 || length_ <= 0) return;
+
+    // PDFium copies the FPDF_FILEACCESS structure, but the callback's |param|
+    // (this document) must outlive the document, which it does.
+    FPDF_FILEACCESS fileAccess = {};
+    fileAccess.m_FileLen = static_cast<unsigned long>(length_);
+    fileAccess.m_GetBlock = &EditingDocument::ReadBlock;
+    fileAccess.m_Param = this;
     doc_ = FPDF_LoadCustomDocument(&fileAccess, nullptr);
 }
 
@@ -25,14 +20,35 @@ EditingDocument::~EditingDocument() {
     if (fd_ >= 0) close(fd_);
 }
 
+int EditingDocument::ReadBlock(void* param, unsigned long pos,
+                               unsigned char* buffer, unsigned long size) {
+    auto* document = static_cast<EditingDocument*>(param);
+    if (!document || document->fd_ < 0 || !buffer) return 0;
+
+    const off_t target = static_cast<off_t>(document->offset_ + static_cast<long>(pos));
+    if (lseek(document->fd_, target, SEEK_SET) == static_cast<off_t>(-1)) return 0;
+
+    unsigned long remaining = size;
+    unsigned char* cursor = buffer;
+    while (remaining > 0) {
+        const ssize_t readBytes = read(document->fd_, cursor, remaining);
+        if (readBytes <= 0) return 0;
+        cursor += readBytes;
+        remaining -= static_cast<unsigned long>(readBytes);
+    }
+    return 1;
+}
+
 int EditingDocument::pageCount() const {
+    if (!doc_) return 0;
     return FPDF_GetPageCount(doc_);
 }
 
 FPDF_PAGE EditingDocument::loadPage(int index) const {
+    if (!doc_ || index < 0 || index >= pageCount()) return nullptr;
     return FPDF_LoadPage(doc_, index);
 }
 
 void EditingDocument::closePage(FPDF_PAGE page) const {
-    FPDF_ClosePage(page);
+    if (page) FPDF_ClosePage(page);
 }

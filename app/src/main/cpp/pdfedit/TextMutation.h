@@ -4,27 +4,36 @@
 #include "EditingDocument.h"
 #include <fpdf_edit.h>
 #include <fpdf_text.h>
+#include <fpdfview.h>
 #include <string>
 
 namespace TextMutation {
 
-// Path A: Try in-place text set on existing text object
-// Returns true on success, false if font cannot encode new text or other failure
+// Path A: replace the text of an existing text object with FPDFText_SetText.
+// Returns false when the object is not a text object or PDFium rejects the text.
 bool setText(EditingDocument* doc, int pageIndex, int objectIndex,
              const std::u16string& newText);
 
-// Path B: Replace text object with new one using bundled font
-// Removes old object, creates new text object with same matrix/size/color
-void replaceTextObject(EditingDocument* doc, int pageIndex, int objectIndex,
+// Path B: replace the object with a new text object that uses |font| (or the
+// old object's own font when |font| is null), preserving its matrix, size and
+// fill colour. Returns false on any failure; on failure the page is unchanged.
+bool replaceTextObject(EditingDocument* doc, int pageIndex, int objectIndex,
                        const std::u16string& newText,
                        FPDF_FONT font, float fontSizePt,
-                       int color, const float* matrix); // CTM 6 floats: [a, b, c, d, e, f]
+                       int color, const float* matrix);
 
-// Get text object count for a page (for matching charIndex to objectIndex)
+// Number of page objects (the index domain used by the JNI API).
 int getTextObjectCount(EditingDocument* doc, int pageIndex);
 
-// Get character count for a specific text object
+// Length, in UTF-16 code units, of one text object's text.
 int getTextObjectCharCount(EditingDocument* doc, int pageIndex, int objectIndex);
+
+// The single TEXT object whose bounds overlap the given rectangle (PDF
+// coordinates: left, bottom, right, top) and whose text equals |text| after
+// whitespace normalisation. Returns -1 when zero or more than one object match.
+int findTextObject(EditingDocument* doc, int pageIndex,
+                   float left, float bottom, float right, float top,
+                   const std::u16string& text);
 
 } // namespace TextMutation
 
