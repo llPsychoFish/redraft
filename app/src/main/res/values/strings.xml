@@ -125,6 +125,7 @@
     <string name="font_fallback_sans">Liberation Sans</string>
     <string name="font_fallback_mono">Liberation Mono</string>
     <string name="cd_editing_line">Editing line: %s</string>
+    <string name="cd_document_text_color">Document text colour</string>
     <string name="apply">Apply</string>
     <string name="cancel">Cancel</string>
     <string name="edit_failed">Edit failed: %s</string>

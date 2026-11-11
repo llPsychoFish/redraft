@@ -35,6 +35,9 @@ class EditorPanelTest {
         }
 
         composeRule.onNodeWithText("Edit Text").assertIsDisplayed()
+        // The PDF's black text colour is shown as a swatch, not as the field text,
+        // which must stay readable on the dark panel.
+        composeRule.onNodeWithContentDescription("Document text colour").assertIsDisplayed()
         composeRule
             .onNodeWithContentDescription("Editing line: Hello World", substring = true)
             .assertIsDisplayed()

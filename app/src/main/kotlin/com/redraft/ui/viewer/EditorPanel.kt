@@ -1,14 +1,18 @@
 package com.redraft.ui.viewer
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -22,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -63,13 +68,32 @@ fun EditorPanel(
             .background(MaterialTheme.colorScheme.surfaceContainerHigh),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Title
-        Text(
-            text = stringResource(R.string.edit_text_title), // "Edit Text"
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.onSurface,
+        // Title, with the document's real text colour as a small swatch so the
+        // preview can use the theme colour without hiding that information.
+        Row(
             modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
-        )
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = stringResource(R.string.edit_text_title), // "Edit Text"
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            val colorDesc = stringResource(R.string.cd_document_text_color)
+            Box(
+                Modifier
+                    .size(14.dp)
+                    .clip(CircleShape)
+                    .background(Color(state.textColor))
+                    .border(
+                        width = 1.dp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
+                        shape = CircleShape,
+                    )
+                    .semantics { contentDescription = colorDesc },
+            )
+        }
 
         // Inline notices (amber = primary)
         if (state.fontChangeNotice != null) {
@@ -111,9 +135,11 @@ fun EditorPanel(
                 imeAction = ImeAction.Done,
                 capitalization = KeyboardCapitalization.Sentences,
             ),
+            // The preview uses the theme's readable colour, never the document's:
+            // painting black PDF text on this dark panel made the draft invisible.
+            // The size is clamped so a large heading still fits the field.
             textStyle = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = state.fontSizePt.sp,
-                color = Color(state.textColor),
+                fontSize = state.fontSizePt.coerceIn(12f, 20f).sp,
             ),
             interactionSource = remember { MutableInteractionSource() },
         )
