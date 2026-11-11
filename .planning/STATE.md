@@ -31,7 +31,7 @@ See: .planning/PROJECT.md (updated 2026-10-16)
 Phase: 03 — text-editing-mvp (plan 1 of 3 complete)
 Plan: 3 of 3
 Status: Tracer plan (03-01) complete; vertical slice proven
-Last activity: 2026-11-06 — plan 03-01 tracer executed
+Last activity: 2026-11-11 - Completed quick task 261111-ptx: Phase 3 text editing fixes
 
 Progress: [█████████░] 92% - Phases 1, 01.1, 2 complete; Phase 3 plan 1 done
 
@@ -154,6 +154,7 @@ None yet.
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | VIEWER-06 (Phase 1 wiring) | The page's `/Rotate` never reaches `PdfViewportTransform`: `PdfDocumentHandle.pageSize` stores PDFium's `getPageRotation()` — an **index 0..3**, not degrees — in a field named `rotationDegrees`, so `normalizeRotation` collapses it to 0 and the 90/270 arms of the transform are unreachable in production (`pdfcore/src/main/kotlin/com/redraft/pdfcore/PdfDocumentHandle.kt:50`). No Phase-1 user-visible impact (PDFium's width/height are already rotated, so pages display correctly); it lands on Phase 2's hit-testing. **Fix it at the source** and do NOT swap the dimensions twice — a naive "1 -> 90" would double-swap. | Deferred to Phase 2 — recorded in ROADMAP.md's Phase 2 section ("Carried from Phase 1") | 2026-10-20 (phase 01 re-verification) |
+| 261111-ptx | Fix Phase 3 text editing: reachable Edit-text action, docked editor panel, engine wiring, real native PDFium build and bounds+text object matching | 2026-11-11 | 8a780ba, 4d2dc2c, e890361 | [261111-ptx-phase3-text-editing-fixes](./quick/261111-ptx-phase3-text-editing-fixes/) |
 
 ## Session Continuity
 
