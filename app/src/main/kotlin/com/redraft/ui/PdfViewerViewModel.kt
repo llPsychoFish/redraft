@@ -8,6 +8,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import android.util.Log
 import com.redraft.data.DocumentError
 import com.redraft.pdfcore.PdfPoint
 import com.redraft.pdfcore.PdfRect
@@ -126,9 +127,34 @@ private object FontFallbackConstants {
     val LIBERATION_LATIN_CHARS: Set<Char> = (0x0020..0x024F).map { it.toChar() }.toSet()
 }
 
+/**
+ * True for a PDF subset-font name such as `ABCDEF+TimesNewRomanPSMT`.
+ *
+ * The six-letter tag is a PREFIX; a whole-string match would never be true for a
+ * real font name (the old bug), so every real font looked non-subset.
+ */
+private fun isSubsetFontName(fontName: String): Boolean =
+    Regex("^[A-Z]{6}\\+").containsMatchIn(fontName)
+
+/**
+ * Builds the font facts used by the fallback decision.
+ *
+ * `fontName` is empty when extraction cannot supply one (the pinned binding exposes
+ * no per-fragment font name). An empty name is deliberately treated as "font
+ * unknown": unchanged text keeps the original object, and any NEW character falls
+ * through to the bundled Liberation font. That is the documented fallback.
+ */
+private fun fontAnalysisOf(fontName: String): FontAnalysis = FontAnalysis(
+    originalFontName = fontName,
+    isSubset = isSubsetFontName(fontName),
+    isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(fontName.substringAfterLast("+")),
+    bold = fontName.contains("Bold", true),
+    italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
+)
+
 /** Selects the appropriate bundled Liberation font for a font analysis. */
 private fun selectBundledFont(analysis: FontAnalysis): String {
-    val baseName = if (analysis.originalFontName.matches(Regex("^[A-Z]{6}\\+")))
+    val baseName = if (isSubsetFontName(analysis.originalFontName))
         analysis.originalFontName.substringAfterLast("+")
     else
         analysis.originalFontName
@@ -138,7 +164,14 @@ private fun selectBundledFont(analysis: FontAnalysis): String {
         baseName.contains("Courier", true) || baseName.contains("Mono", true) -> "LiberationMono"
         else -> "LiberationSans"
     }
-    return "$family${if (analysis.bold) "Bold" else ""}${if (analysis.italic) "Italic" else ""}"
+    // Asset stems are LiberationSans-Regular/-Bold/-Italic/-BoldItalic; a bare
+    // "LiberationSans" never matched a bundled file.
+    return when {
+        analysis.bold && analysis.italic -> "$family-BoldItalic"
+        analysis.bold -> "$family-Bold"
+        analysis.italic -> "$family-Italic"
+        else -> "$family-Regular"
+    }
 }
 
 /** Analyzes whether the original font can handle the new text, or if fallback is needed. */
@@ -147,7 +180,7 @@ private fun analyzeFontForEdit(
     newText: String,
     originalText: String
 ): FontFallbackDecision {
-    val isSubset = originalFontName.matches(Regex("^[A-Z]{6}\\+"))
+    val isSubset = isSubsetFontName(originalFontName)
     val baseName = if (isSubset) originalFontName.substringAfterLast("+") else originalFontName
     val isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(baseName)
     
@@ -199,6 +232,7 @@ const val MIN_ZOOM = 1f
 const val MAX_ZOOM = 5f
 
 private const val TAG = "PdfViewerViewModel"
+private const val TAG_EDIT = "RedraftEdit"
 
 /**
  * Per-page text extraction state (D-28 … D-31).
@@ -234,6 +268,21 @@ enum class ViewerMessage {
 
     /** "Edit failed: <reason>" — shown when save/reopen fails after edit. */
     EditFailed,
+
+    /** "Select a line first" — Edit text tapped with nothing selected. */
+    NothingSelected,
+
+    /** "This text cannot be edited" — the selected line is vertical or RTL. */
+    LineNotEditable,
+
+    /** "This page's text is still loading" — extraction is missing or failed. */
+    PageTextNotReady,
+
+    /** "Editing is not available on this device" — the native module is missing. */
+    EditingUnavailable,
+
+    /** "Cannot edit this line safely" — no single text object matches the line. */
+    EditTargetAmbiguous,
 }
 
 /** How long a tap waits for an in-flight extraction before it is dropped (D-29). */
@@ -271,6 +320,8 @@ class PdfViewerViewModel(
      * Content resolver provider for opening file descriptors. In tests, can provide a mock.
      */
     private val contentResolverProvider: (() -> android.content.ContentResolver)? = null,
+    /** Application context used for the edit cache and reopening the saved copy. Null in tests. */
+    private val appContext: Context? = null,
     // Cache ownership (A-1) — single instance per ViewModel
     val pageBitmapCache: PageBitmapCache = PageBitmapCache(),
     val thumbnailCache: ThumbnailCache = ThumbnailCache(),
@@ -355,6 +406,8 @@ class PdfViewerViewModel(
     private var editingEngine: com.redraft.pdfedit.PdfEditingEngine? = null
     private var editingHandle: EditingHandle? = null
     private var editingHandleJob: Job? = null
+    // The "editing unavailable" snackbar is shown once per open document, not on every tap.
+    private var editingUnavailableNotified = false
 
     // Render scope for cancelling in-flight renders on document swap
     private var renderJob = SupervisorJob()
@@ -661,6 +714,19 @@ class PdfViewerViewModel(
         _selectionState.value = newState
     }
 
+    /**
+     * Test hook: attaches an already-open editing session. The production path
+     * creates the engine and opens the document through the ContentResolver,
+     * which a JVM unit test cannot construct.
+     */
+    internal fun attachEditingSessionForTest(
+        engine: com.redraft.pdfedit.PdfEditingEngine,
+        handle: EditingHandle,
+    ) {
+        editingEngine = engine
+        editingHandle = handle
+    }
+
     /** Updates the editor state with new draft text, computing warnings and apply eligibility. */
     fun updateEditorState(newState: EditorPanelState) {
         val editor = _editorState.value ?: return
@@ -669,15 +735,7 @@ class PdfViewerViewModel(
         val fragment = line.fragment
         
         val fontName = fragment.style.fontName ?: ""
-        val fontAnalysis = FontAnalysis(
-            originalFontName = fontName,
-            isSubset = fontName.matches(Regex("^[A-Z]{6}\\+")),
-            isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(
-                if (fontName.matches(Regex("^[A-Z]{6}\\+"))) fontName.substringAfterLast("+") else fontName
-            ),
-            bold = fontName.contains("Bold", true),
-            italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
-        )
+        val fontAnalysis = fontAnalysisOf(fontName)
         
         val fallbackDecision = analyzeFontForEdit(fontName, newState.draftText, editor.originalText)
         
@@ -693,7 +751,8 @@ class PdfViewerViewModel(
             else -> null
         }
         val lengthWarning = newState.draftText.length > editor.originalText.length * 1.2
-        val canApply = fallbackDecision != FontFallbackDecision.UNSUPPORTED_CHARS && !lengthWarning && newState.draftText != editor.originalText
+        // The 1.2x length check is a NOTICE only: it must not disable Apply.
+        val canApply = fallbackDecision != FontFallbackDecision.UNSUPPORTED_CHARS && newState.draftText != editor.originalText
 
         _editorState.value = newState.copy(
             fontChangeNotice = fontChangeNotice,
@@ -705,27 +764,55 @@ class PdfViewerViewModel(
 
     /** Opens the inline editor for the currently selected line. */
     fun onEditText() {
-        val selection = _selectionState.value ?: return
-        if (!selection.editable) {
-            // Non-editable: show snackbar via message channel (handled by UI)
+        val selection = _selectionState.value
+        if (selection == null) {
+            Log.d(TAG_EDIT, "onEditText: no line selected")
+            _messages.tryEmit(ViewerMessage.NothingSelected)
             return
         }
-        val layout = textLayoutCache[selection.pageIndex] ?: return
+        if (!selection.editable) {
+            Log.d(TAG_EDIT, "onEditText: selected line is not editable")
+            _messages.tryEmit(ViewerMessage.LineNotEditable)
+            return
+        }
+        if (selection.selectedLine == null) {
+            Log.d(TAG_EDIT, "onEditText: selection has no line")
+            _messages.tryEmit(ViewerMessage.NothingSelected)
+            return
+        }
+        if (textLayoutCache[selection.pageIndex] == null) {
+            val handle = currentHandle
+            if (handle == null) {
+                Log.d(TAG_EDIT, "onEditText: page text not ready (no document)")
+                _messages.tryEmit(ViewerMessage.PageTextNotReady)
+                return
+            }
+            // The layout was evicted or never extracted: re-extract, then continue
+            // instead of silently giving up (the old behaviour).
+            Log.d(TAG_EDIT, "onEditText: layout missing for page ${selection.pageIndex}, re-extracting")
+            viewModelScope.launch {
+                if (awaitPageText(selection.pageIndex, handle) is PageTextState.Ready) {
+                    openEditorForSelection()
+                } else {
+                    Log.d(TAG_EDIT, "onEditText: extraction did not produce a layout")
+                    _messages.tryEmit(ViewerMessage.PageTextNotReady)
+                }
+            }
+            return
+        }
+        openEditorForSelection()
+    }
+
+    /** Builds the editor state from the current selection (its layout must be cached). */
+    private fun openEditorForSelection() {
+        val selection = _selectionState.value ?: return
         val line = selection.selectedLine ?: return
         val fragment = line.fragment
 
         // Full font fallback analysis (D-304)
         val originalText = line.chars.joinToString("") { it.text }.trim()
         val fontName = fragment.style.fontName ?: ""
-        val fontAnalysis = FontAnalysis(
-            originalFontName = fontName,
-            isSubset = fontName.matches(Regex("^[A-Z]{6}\\+")),
-            isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(
-                if (fontName.matches(Regex("^[A-Z]{6}\\+"))) fontName.substringAfterLast("+") else fontName
-            ),
-            bold = fontName.contains("Bold", true),
-            italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
-        )
+        val fontAnalysis = fontAnalysisOf(fontName)
         
         // Initial analysis with original text (no new chars yet)
         val fallbackDecision = analyzeFontForEdit(fontName, originalText, originalText)
@@ -759,23 +846,29 @@ class PdfViewerViewModel(
     /** Commits the edit: creates EditCommand, executes via JNI, pushes to stack. */
     fun onApplyEdit(newText: String) {
         val editor = _editorState.value ?: return
-        val selection = _selectionState.value ?: return
-        val handle = editingHandle ?: return
-        val engine = editingEngine ?: return
-        val line = selection.selectedLine ?: return
+        val selection = _selectionState.value
+        if (selection == null) {
+            Log.d(TAG_EDIT, "onApplyEdit: no line selected")
+            _messages.tryEmit(ViewerMessage.NothingSelected)
+            return
+        }
+        val handle = editingHandle
+        val engine = editingEngine
+        if (handle == null || engine == null) {
+            notifyEditingUnavailable("apply")
+            return
+        }
+        val line = selection.selectedLine
+        if (line == null) {
+            Log.d(TAG_EDIT, "onApplyEdit: selection has no line")
+            _messages.tryEmit(ViewerMessage.NothingSelected)
+            return
+        }
         val fragment = line.fragment
 
         // Determine font for this edit
         val fontName = fragment.style.fontName ?: ""
-        val fontAnalysis = FontAnalysis(
-            originalFontName = fontName,
-            isSubset = fontName.matches(Regex("^[A-Z]{6}\\+")),
-            isStandard14 = FontFallbackConstants.STANDARD_14_FONTS.contains(
-                if (fontName.matches(Regex("^[A-Z]{6}\\+"))) fontName.substringAfterLast("+") else fontName
-            ),
-            bold = fontName.contains("Bold", true),
-            italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
-        )
+        val fontAnalysis = fontAnalysisOf(fontName)
         val fallbackDecision = analyzeFontForEdit(fontName, newText, editor.originalText)
         val newFontName = when (fallbackDecision) {
             FontFallbackDecision.USE_BUNDLED_FALLBACK -> selectBundledFont(fontAnalysis)
@@ -783,9 +876,22 @@ class PdfViewerViewModel(
         }
         
         viewModelScope.launch {
-            // Compute objectIndex from charIndex (suspend JNI calls)
-            val charIndex = line.chars.firstOrNull()?.index ?: return@launch
-            val objectIndex = findObjectIndexForCharIndex(handle, selection.pageIndex, charIndex)
+            // Find the ONE page object whose bounds and text match this line. A miss is
+            // reported, never guessed: editing the wrong object corrupts the page.
+            val objectIndex = engine.findTextObject(
+                handle = handle,
+                pageIndex = selection.pageIndex,
+                left = line.rect.minX,
+                top = line.rect.minY,
+                right = line.rect.maxX,
+                bottom = line.rect.maxY,
+                text = editor.originalText,
+            )
+            if (objectIndex < 0) {
+                Log.d(TAG_EDIT, "onApplyEdit: no single text object matches the line")
+                _messages.tryEmit(ViewerMessage.EditTargetAmbiguous)
+                return@launch
+            }
             
             // Load bundled font if needed
             var fontHandle: FontHandle? = null
@@ -813,13 +919,15 @@ class PdfViewerViewModel(
             // Execute mutation (Path A or B) with failure handling
             try {
                 val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
-                if (!success && fontHandle != null) {
-                    engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                        fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
-                } else if (!success) {
-                    // Fallback: try with standard font (shouldn't happen if analysis is correct)
-                    engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                        FontHandle(0), cmd.fontSizePt, cmd.color, cmd.matrix)
+                if (!success) {
+                    // Path B: the embedded font cannot encode the new text. A zero
+                    // font handle tells the native layer to reuse the object's own
+                    // font; a bundled fallback is used when the analysis chose one.
+                    val replaced = engine.replaceTextObject(
+                        handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                        fontHandle ?: FontHandle(0), cmd.fontSizePt, cmd.color, cmd.matrix,
+                    )
+                    if (!replaced) throw IllegalStateException("Text replacement failed")
                 }
 
                 // Save copy → reopen rendering doc → invalidate cache
@@ -892,8 +1000,10 @@ class PdfViewerViewModel(
                 } else {
                     FontHandle(0)
                 }
-                engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                    fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)
+                if (!engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
+                        fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)) {
+                    throw IllegalStateException("Text replacement failed")
+                }
             }
 
             val tempFile = createTempEditFile()
@@ -910,21 +1020,10 @@ class PdfViewerViewModel(
         }
     }
 
-    private suspend fun findObjectIndexForCharIndex(handle: EditingHandle, pageIndex: Int, charIndex: Int): Int {
-        val engine = editingEngine ?: return 0
-        val count = engine.getTextObjectCount(handle, pageIndex)
-        var accumulated = 0
-        for (objIdx in 0 until count) {
-            val objCharCount = engine.getTextObjectCharCount(handle, pageIndex, objIdx)
-            accumulated += objCharCount
-            if (charIndex < accumulated) return objIdx
-        }
-        return 0 // Fallback
-    }
-
     private fun createTempEditFile(): java.io.File {
-        val file = java.io.File.createTempFile("edit_", ".pdf", android.content.ContextWrapper(android.app.Application()).cacheDir)
-        file.deleteOnExit()
+        val cacheDir = appContext?.cacheDir
+            ?: throw IllegalStateException("No application context for the edit cache")
+        val file = java.io.File.createTempFile("edit_", ".pdf", cacheDir)
         currentEditTempFile = file
         return file
     }
@@ -934,8 +1033,9 @@ class PdfViewerViewModel(
         val uri = currentUri ?: return
         
         // SAFE REOPEN (D-305): Open and verify new document BEFORE closing old
+        val context = appContext ?: throw IllegalStateException("No application context for reopen")
         val newHandleResult = withContext(ioDispatcher) {
-            SafDocumentOpener.open(android.content.ContextWrapper(android.app.Application()), android.net.Uri.fromFile(tempFile))
+            SafDocumentOpener.open(context, android.net.Uri.fromFile(tempFile))
         }
         
         val newHandle = newHandleResult.fold(
@@ -1193,18 +1293,12 @@ class PdfViewerViewModel(
                             )
                             _documentOpened.trySend(Unit)
 
-                            // Initialize editing engine and handle for this document (only if content resolver is available)
+                            // Editing is optional: a missing native library or an
+                            // unreadable descriptor must never stop the viewer opening.
+                            editingUnavailableNotified = false
                             contentResolverProvider?.let { provider ->
-                                editingEngine = editingEngineFactory?.invoke() ?: PdfEditModule.engine()
                                 editingHandleJob = viewModelScope.launch {
-                                    val contentResolver = provider()
-                                    val pfd = contentResolver.openFileDescriptor(android.net.Uri.parse(uri), "r")
-                                    pfd?.use { fileDescriptor ->
-                                        editingEngine?.open(android.net.Uri.parse(uri), fileDescriptor)?.fold(
-                                            onSuccess = { it.also { editingHandle = it } },
-                                            onFailure = { /* log error; editing unavailable */ }
-                                        )
-                                    }
+                                    withContext(ioDispatcher) { openEditingSession(uri, provider) }
                                 }
                             }
                         },
@@ -1232,6 +1326,50 @@ class PdfViewerViewModel(
         }
     }
 
+    /**
+     * Creates the editing engine and opens the editing document, off the main thread.
+     *
+     * Every failure — `UnsatisfiedLinkError` from a missing `libpdfedit.so`, a null
+     * descriptor, a corrupt document — leaves the viewer fully usable and only
+     * disables editing. Nothing here may crash the open path.
+     */
+    private suspend fun openEditingSession(uri: String, provider: () -> android.content.ContentResolver) {
+        try {
+            val engine = editingEngineFactory?.invoke() ?: PdfEditModule.engine()
+            val parsed = Uri.parse(uri)
+            val pfd = provider().openFileDescriptor(parsed, "r")
+            if (pfd == null) {
+                Log.w(TAG_EDIT, "openEditingSession: no file descriptor for $uri")
+                return
+            }
+            pfd.use { descriptor ->
+                engine.open(parsed, descriptor).fold(
+                    onSuccess = { opened ->
+                        editingEngine = engine
+                        editingHandle = opened
+                        Log.d(TAG_EDIT, "openEditingSession: editing document open")
+                    },
+                    onFailure = { error ->
+                        Log.w(TAG_EDIT, "openEditingSession: could not open the editing document", error)
+                    },
+                )
+            }
+        } catch (error: Throwable) {
+            // Includes UnsatisfiedLinkError: the native editing module is absent.
+            Log.w(TAG_EDIT, "openEditingSession: editing unavailable", error)
+            editingEngine = null
+            editingHandle = null
+        }
+    }
+
+    /** Emits the "editing unavailable" notice once per open document. */
+    private fun notifyEditingUnavailable(reason: String) {
+        Log.d(TAG_EDIT, "editing unavailable: $reason")
+        if (editingUnavailableNotified) return
+        editingUnavailableNotified = true
+        _messages.tryEmit(ViewerMessage.EditingUnavailable)
+    }
+
     override fun onCleared() {
         closeDocument()
     }
@@ -1239,12 +1377,18 @@ class PdfViewerViewModel(
     companion object {
         fun factory(context: Context): ViewModelProvider.Factory {
             val app = context.applicationContext
+            // Store the context only. Loading libpdfedit happens on the first engine
+            // creation (off the main thread) so a device without the module still opens.
+            PdfEditModule.initialize(app)
             return viewModelFactory {
                 initializer {
                     PdfViewerViewModel(
                         recentsRepository = RecentFilesRepository(app),
                         openDocument = { uri -> SafDocumentOpener.open(app, Uri.parse(uri)) },
                         resolveDisplayName = { uri -> SafDocumentOpener.displayName(app, Uri.parse(uri)) },
+                        editingEngineFactory = { PdfEditModule.engine() },
+                        contentResolverProvider = { app.contentResolver },
+                        appContext = app,
                     )
                 }
             }

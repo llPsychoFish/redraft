@@ -2,28 +2,37 @@ package com.redraft.pdfedit
 
 import android.content.Context
 
-/** Ensures the native library is loaded and provides the engine instance. */
+/**
+ * Ensures the native library is loaded and provides the engine instance.
+ *
+ * The library is loaded lazily, on the first engine request. Calling
+ * [initialize] only stores the application context, so a build or device without
+ * `libpdfedit.so` still opens the viewer; editing reports itself unavailable.
+ */
 object PdfEditModule {
-    @Volatile private var _libraryLoaded = false
-    
+    @Volatile private var appContext: Context? = null
+    @Volatile private var libraryLoaded = false
+
+    fun initialize(context: Context) {
+        appContext = context.applicationContext
+    }
+
     private fun ensureLibraryLoaded() {
-        if (!_libraryLoaded) {
+        if (!libraryLoaded) {
             synchronized(this) {
-                if (!_libraryLoaded) {
+                if (!libraryLoaded) {
                     System.loadLibrary("pdfedit")
-                    _libraryLoaded = true
+                    libraryLoaded = true
                 }
             }
         }
     }
-    
-    fun initialize(context: Context) {
-        ensureLibraryLoaded()
-        PdfEditingEngineImpl.initialize(context)
-    }
 
     fun engine(): PdfEditingEngine {
+        val context = appContext
+            ?: throw IllegalStateException("PdfEditModule.initialize(context) was not called")
         ensureLibraryLoaded()
+        PdfEditingEngineImpl.initialize(context)
         return PdfEditingEngineImpl.get()
     }
 }

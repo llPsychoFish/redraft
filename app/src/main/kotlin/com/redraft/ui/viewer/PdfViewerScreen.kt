@@ -725,13 +725,15 @@ private fun PdfPageItem(
                                             latestTolerance.value,
                                         )
                                         hitResult?.let { result ->
-                                            // Check if hit line matches selected line by blockId or charIndex range
+                                            // Same LINE means the same character range. A
+                                            // blockId identifies the whole paragraph, so a tap on
+                                            // another line of that paragraph used to reopen the
+                                            // editor for the previous line.
                                             val selectedLine = selectionState?.selectedLine
-                                            selectedLine != null && (
-                                                (result.line.blockId != null && result.line.blockId == selectedLine.blockId) ||
-                                                (result.line.firstCharIndex <= selectedLine.chars.last().index &&
-                                                 result.line.chars.last().index >= selectedLine.chars.first().index)
-                                            )
+                                            selectedLine != null &&
+                                                result.line.firstCharIndex == selectedLine.firstCharIndex &&
+                                                result.line.chars.lastOrNull()?.index ==
+                                                selectedLine.chars.lastOrNull()?.index
                                         } ?: false
                                     } ?: false
                                 } else false

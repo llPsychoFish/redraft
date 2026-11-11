@@ -3,20 +3,19 @@ package com.redraft.ui.viewer
 import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
@@ -30,16 +29,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
@@ -49,24 +46,20 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.R
+import com.redraft.data.AppSettings
 import com.redraft.ui.MIN_ZOOM
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.ViewerMessage
 import com.redraft.ui.settings.SettingsViewModel
-import com.redraft.data.AppSettings
-import com.redraft.ui.viewer.EditorPanel
-import com.redraft.ui.viewer.EditorPanelState
+import kotlinx.coroutines.launch
 
 private val TopBarHeight = 64.dp
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ViewerRoute(
     viewModel: PdfViewerViewModel,
@@ -116,12 +109,32 @@ fun ViewerRoute(
     val noSelectableText = stringResource(R.string.no_selectable_text)
     val couldNotReadText = stringResource(R.string.could_not_read_text)
     val editFailed = stringResource(R.string.edit_failed)
-    LaunchedEffect(viewModel, noSelectableText, couldNotReadText, editFailed) {
+    val nothingSelected = stringResource(R.string.select_line_first)
+    val lineNotEditable = stringResource(R.string.line_not_editable)
+    val pageTextNotReady = stringResource(R.string.page_text_not_ready)
+    val editingUnavailable = stringResource(R.string.editing_unavailable)
+    val editTargetAmbiguous = stringResource(R.string.edit_target_ambiguous)
+    LaunchedEffect(
+        viewModel,
+        noSelectableText,
+        couldNotReadText,
+        editFailed,
+        nothingSelected,
+        lineNotEditable,
+        pageTextNotReady,
+        editingUnavailable,
+        editTargetAmbiguous,
+    ) {
         viewModel.messages.collect { message ->
             val text = when (message) {
                 ViewerMessage.NoSelectableText -> noSelectableText
                 ViewerMessage.CouldNotReadText -> couldNotReadText
                 ViewerMessage.EditFailed -> editFailed
+                ViewerMessage.NothingSelected -> nothingSelected
+                ViewerMessage.LineNotEditable -> lineNotEditable
+                ViewerMessage.PageTextNotReady -> pageTextNotReady
+                ViewerMessage.EditingUnavailable -> editingUnavailable
+                ViewerMessage.EditTargetAmbiguous -> editTargetAmbiguous
             }
             snackbarHostState.showSnackbar(text)
         }
@@ -150,6 +163,8 @@ fun ViewerRoute(
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val topBarSpace = statusBarTop + TopBarHeight
 
+    val scope = rememberCoroutineScope()
+
     Box(modifier = modifier.fillMaxSize()) {
         // Content - PdfViewerScreen takes full screen
         PdfViewerScreen(
@@ -164,29 +179,6 @@ fun ViewerRoute(
             modifier = Modifier.fillMaxSize(),
         )
 
-        // Editor panel (docked above IME) — visible when editorState has value
-        AnimatedVisibility(
-            visible = editorState != null,
-            enter = fadeIn(animationSpec = tween(150)) + slideInVertically(initialOffsetY = { it }, animationSpec = tween(150)),
-            exit = fadeOut(animationSpec = tween(100)) + slideOutVertically(targetOffsetY = { it }, animationSpec = tween(100)),
-        ) {
-            EditorPanel(
-                state = editorState!!,
-                onTextChange = { newText ->
-                    val updated = editorState!!.withDraftText(newText)
-                    val lengthWarning = newText.length > editorState!!.originalText.length * 1.2 // approximate
-                    val canApply = newText != editorState!!.originalText && !lengthWarning && editorState!!.showUnsupportedChar == null
-                    viewModel.updateEditorState(updated.copy(lengthWarning = lengthWarning, canApply = canApply))
-                },
-                onApply = { viewModel.onApplyEdit(editorState!!.draftText) },
-                onCancel = { viewModel.dismissEditor() },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding() // respect nav bar
-                    .zIndex(10f), // above page content
-            )
-        }
-
         // Overlay TopAppBar with animation
         AnimatedVisibility(
             visible = barsVisible,
@@ -195,107 +187,58 @@ fun ViewerRoute(
             exit = fadeOut(animationSpec = tween(150, easing = FastOutSlowInEasing)) +
                 slideOutVertically(targetOffsetY = { -it }, animationSpec = tween(150, easing = FastOutSlowInEasing)),
         ) {
-            TopAppBar(
-                // TopAppBar already pads itself for the status bar; the old extra manual
-                // padding doubled it and made the bar taller than the space reserved for it.
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface),
-                title = {
-                    Text(
-                        text = uiState.documentName.orEmpty(),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
+            ViewerTopBar(
+                title = uiState.documentName.orEmpty(),
+                pageIndex = uiState.visiblePageIndex,
+                pageCount = uiState.pageCount,
+                zoom = uiState.zoom,
+                editMode = editMode,
+                hasSelection = selection != null,
+                canEditSelection = selection?.editable == true,
+                onBack = onBack,
+                onFitWidth = {
+                    viewModel.onZoomChanged(MIN_ZOOM)
+                    viewModel.onPanChanged(0f)
                 },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_arrow_back),
-                            contentDescription = stringResource(R.string.cd_back),
-                        )
-                    }
+                onOpenOverview = onOpenOverview,
+                onToggleEditMode = { viewModel.toggleEditMode() },
+                onEditText = { viewModel.onEditText() },
+                onNothingSelected = {
+                    scope.launch { snackbarHostState.showSnackbar(nothingSelected) }
                 },
-                actions = {
-                    if (uiState.pageCount > 0) {
-                        Text(
-                            text = stringResource(R.string.viewer_page_counter, uiState.visiblePageIndex + 1, uiState.pageCount),
-                            style = MaterialTheme.typography.bodyMedium,
-                            modifier = Modifier.padding(horizontal = 8.dp),
-                        )
-                    }
-                    // Fit width is the zoom floor, so the control is only meaningful
-                    // while the reader is zoomed in.
-                    IconButton(
-                        onClick = {
-                            viewModel.onZoomChanged(MIN_ZOOM)
-                            viewModel.onPanChanged(0f)
-                        },
-                        enabled = uiState.zoom > MIN_ZOOM,
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_fit_width),
-                            contentDescription = stringResource(R.string.cd_fit_width),
-                        )
-                    }
-                    IconButton(onClick = onOpenOverview) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_grid_view),
-                            contentDescription = stringResource(R.string.cd_page_overview),
-                        )
-                    }
-                    // Edit mode (D-18, D-22): a pencil action with a
-                    // string-resource content description and a selected state
-                    // for TalkBack.
-                    IconButton(
-                        onClick = { viewModel.toggleEditMode() },
-                        modifier = Modifier.semantics { selected = editMode },
-                    ) {
-                        Icon(
-                            painter = painterResource(R.drawable.ic_edit),
-                            contentDescription = stringResource(R.string.edit_mode),
-                            tint = if (editMode) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            },
-                        )
-                    }
-                    // NEW: "Edit text" action — only in Edit mode with selection + editable
-                    if (editMode) {
-                        val currentSelection = selection
-                        val canEdit = currentSelection != null && currentSelection.editable
-                        val cannotEditText = stringResource(R.string.cannot_edit_text)
-                        val editDesc = if (canEdit) stringResource(R.string.edit_selected_text) else cannotEditText
-                        val scope = rememberCoroutineScope()
-                        // Use a Box to intercept clicks even when "disabled" for non-editable lines
-                        Box(
-                            modifier = Modifier
-                                .semantics { contentDescription = editDesc }
-                                .fillMaxSize(),
-                        ) {
-                            IconButton(
-                                onClick = {
-                                    if (canEdit) {
-                                        viewModel.onEditText()
-                                    } else {
-                                        // Show snackbar for non-editable line
-                                        scope.launch { snackbarHostState.showSnackbar(cannotEditText) }
-                                    }
-                                },
-                                enabled = true, // Always enabled to intercept clicks
-                                modifier = Modifier.semantics { contentDescription = editDesc },
-                            ) {
-                                Icon(
-                                    painter = painterResource(R.drawable.ic_edit),
-                                    contentDescription = editDesc,
-                                    tint = if (canEdit) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
-                                )
-                            }
-                        }
-                    }
+                onCannotEdit = {
+                    scope.launch { snackbarHostState.showSnackbar(lineNotEditable) }
                 },
             )
+        }
+
+        // Editor panel (docked above the IME). Drawn AFTER the page and the bar so it is
+        // never underneath them. The last non-null state is retained so the exit
+        // animation does not read `editorState!!` after it has become null.
+        val shownEditor = remember { mutableStateOf<EditorPanelState?>(null) }
+        if (editorState != null) shownEditor.value = editorState
+        AnimatedVisibility(
+            visible = editorState != null,
+            modifier = Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(animationSpec = tween(150)) + slideInVertically(initialOffsetY = { it }, animationSpec = tween(150)),
+            exit = fadeOut(animationSpec = tween(100)) + slideOutVertically(targetOffsetY = { it }, animationSpec = tween(100)),
+        ) {
+            shownEditor.value?.let { state ->
+                EditorPanel(
+                    state = state,
+                    onTextChange = { newText ->
+                        // The ViewModel recomputes the warnings and apply eligibility from
+                        // the new draft; the UI must not duplicate that logic.
+                        viewModel.updateEditorState(state.withDraftText(newText))
+                    },
+                    onApply = { viewModel.onApplyEdit(state.draftText) },
+                    onCancel = { viewModel.dismissEditor() },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding() // respect nav bar
+                        .imePadding(), // sits above the keyboard
+                )
+            }
         }
 
         // Snackbar host (D-31): overlaid ABOVE the page and the page-indicator
@@ -319,4 +262,127 @@ fun ViewerRoute(
         else if (currentSelection != null) viewModel.clearSelection()
         else viewModel.setEditMode(false)
     }
+}
+
+/**
+ * The viewer's top bar, as a plain composable with no ViewModel dependency.
+ *
+ * Every action sits directly in `actions` — no `fillMaxSize` wrapper — so the bar
+ * never steals width from the title or overlaps the back arrow. The Edit-text
+ * action is a separate icon from the Edit-mode pencil and is deliberately kept
+ * enabled when it cannot act, so a tap can explain why.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ViewerTopBar(
+    title: String,
+    pageIndex: Int,
+    pageCount: Int,
+    zoom: Float,
+    editMode: Boolean,
+    hasSelection: Boolean,
+    canEditSelection: Boolean,
+    onBack: () -> Unit,
+    onFitWidth: () -> Unit,
+    onOpenOverview: () -> Unit,
+    onToggleEditMode: () -> Unit,
+    onEditText: () -> Unit,
+    onNothingSelected: () -> Unit,
+    onCannotEdit: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    TopAppBar(
+        // TopAppBar already pads itself for the status bar; the old extra manual
+        // padding doubled it and made the bar taller than the space reserved for it.
+        modifier = modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surface),
+        title = {
+            Text(
+                text = title,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        },
+        navigationIcon = {
+            IconButton(onClick = onBack) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_arrow_back),
+                    contentDescription = stringResource(R.string.cd_back),
+                )
+            }
+        },
+        actions = {
+            if (pageCount > 0) {
+                Text(
+                    text = stringResource(R.string.viewer_page_counter, pageIndex + 1, pageCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 8.dp),
+                )
+            }
+            // Fit width is the zoom floor, so the control is only meaningful
+            // while the reader is zoomed in.
+            IconButton(
+                onClick = onFitWidth,
+                enabled = zoom > MIN_ZOOM,
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_fit_width),
+                    contentDescription = stringResource(R.string.cd_fit_width),
+                )
+            }
+            IconButton(onClick = onOpenOverview) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_grid_view),
+                    contentDescription = stringResource(R.string.cd_page_overview),
+                )
+            }
+            // Edit mode (D-18, D-22): a pencil action with a
+            // string-resource content description and a selected state
+            // for TalkBack.
+            IconButton(
+                onClick = onToggleEditMode,
+                modifier = Modifier.semantics { selected = editMode },
+            ) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_edit),
+                    contentDescription = stringResource(R.string.edit_mode),
+                    tint = if (editMode) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                )
+            }
+            // "Edit text" — a DIFFERENT glyph from the Edit-mode pencil, only in
+            // Edit mode, and always tappable so an unavailable action can say why.
+            if (editMode) {
+                val editDesc = if (canEditSelection) {
+                    stringResource(R.string.edit_selected_text)
+                } else {
+                    stringResource(R.string.cannot_edit_text)
+                }
+                IconButton(
+                    onClick = {
+                        when {
+                            !hasSelection -> onNothingSelected()
+                            !canEditSelection -> onCannotEdit()
+                            else -> onEditText()
+                        }
+                    },
+                    modifier = Modifier.semantics { contentDescription = editDesc },
+                ) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_edit_text),
+                        contentDescription = editDesc,
+                        tint = if (canEditSelection) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                        },
+                    )
+                }
+            }
+        },
+    )
 }

@@ -128,5 +128,10 @@
     <string name="apply">Apply</string>
     <string name="cancel">Cancel</string>
     <string name="edit_failed">Edit failed: %s</string>
+    <string name="select_line_first">Select a line first</string>
+    <string name="line_not_editable">This text cannot be edited</string>
+    <string name="page_text_not_ready">This page’s text is still loading. Try again.</string>
+    <string name="editing_unavailable">Editing is not available on this device</string>
+    <string name="edit_target_ambiguous">Cannot edit this line safely</string>
     <string name="selection_lost">Selection lost after edit</string>
 </resources>
