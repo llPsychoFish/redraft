@@ -152,6 +152,40 @@ private fun fontAnalysisOf(fontName: String): FontAnalysis = FontAnalysis(
     italic = fontName.contains("Italic", true) || fontName.contains("Oblique", true),
 )
 
+/** Human-readable name for a bundled font asset: "LiberationSans-Bold" → "Liberation Sans Bold". */
+internal fun bundledFontDisplayName(assetStem: String): String =
+    assetStem
+        .replace("LiberationSans", "Liberation Sans")
+        .replace("LiberationSerif", "Liberation Serif")
+        .replace("LiberationMono", "Liberation Mono")
+        .replace("-BoldItalic", " Bold Italic")
+        .replace("-Bold", " Bold")
+        .replace("-Italic", " Italic")
+        .replace("-Regular", "")
+
+/**
+ * The line's text as the editor should show it.
+ *
+ * PDFium does not always emit a space character for a word gap — this PDF's
+ * heading has none between "KOFORIDUA" and "TECHNICAL" — so infer one from the
+ * glyph geometry: a gap wider than 0.2 em between two glyphs is a word gap.
+ */
+internal fun editableLineText(line: com.redraft.pdfcore.selection.TextLine): String {
+    val builder = StringBuilder()
+    var previous: com.redraft.pdfcore.selection.CharBox? = null
+    for (char in line.chars) {
+        val prev = previous
+        if (prev != null && prev.text.isNotBlank() && char.text.isNotBlank()) {
+            val size = maxOf(prev.fontSizePt, char.fontSizePt).takeIf { it > 0f } ?: 10f
+            val gap = char.rect.minX - prev.rect.maxX
+            if (gap > 0.2f * size && !builder.endsWith(" ")) builder.append(' ')
+        }
+        builder.append(char.text)
+        previous = char
+    }
+    return builder.toString().trim()
+}
+
 /** Selects the appropriate bundled Liberation font for a font analysis. */
 private fun selectBundledFont(analysis: FontAnalysis): String {
     val baseName = if (isSubsetFontName(analysis.originalFontName))
@@ -740,7 +774,8 @@ class PdfViewerViewModel(
         val fallbackDecision = analyzeFontForEdit(fontName, newState.draftText, editor.originalText)
         
         val fontChangeNotice = when (fallbackDecision) {
-            FontFallbackDecision.USE_BUNDLED_FALLBACK -> selectBundledFont(fontAnalysis)
+            FontFallbackDecision.USE_BUNDLED_FALLBACK ->
+                bundledFontDisplayName(selectBundledFont(fontAnalysis))
             else -> null
         }
         val showUnsupportedChar = when (fallbackDecision) {
@@ -752,7 +787,11 @@ class PdfViewerViewModel(
         }
         val lengthWarning = newState.draftText.length > editor.originalText.length * 1.2
         // The 1.2x length check is a NOTICE only: it must not disable Apply.
-        val canApply = fallbackDecision != FontFallbackDecision.UNSUPPORTED_CHARS && newState.draftText != editor.originalText
+        // An empty draft cannot match a text object; allowing Apply would only
+        // produce "Cannot edit this line safely".
+        val canApply = fallbackDecision != FontFallbackDecision.UNSUPPORTED_CHARS &&
+            newState.draftText.isNotBlank() &&
+            newState.draftText != editor.originalText
 
         _editorState.value = newState.copy(
             fontChangeNotice = fontChangeNotice,
@@ -810,7 +849,7 @@ class PdfViewerViewModel(
         val fragment = line.fragment
 
         // Full font fallback analysis (D-304)
-        val originalText = line.chars.joinToString("") { it.text }.trim()
+        val originalText = editableLineText(line)
         val fontName = fragment.style.fontName ?: ""
         val fontAnalysis = fontAnalysisOf(fontName)
         
@@ -818,7 +857,8 @@ class PdfViewerViewModel(
         val fallbackDecision = analyzeFontForEdit(fontName, originalText, originalText)
         
         val fontChangeNotice = when (fallbackDecision) {
-            FontFallbackDecision.USE_BUNDLED_FALLBACK -> selectBundledFont(fontAnalysis)
+            FontFallbackDecision.USE_BUNDLED_FALLBACK ->
+                bundledFontDisplayName(selectBundledFont(fontAnalysis))
             else -> null
         }
         val showUnsupportedChar = when (fallbackDecision) {

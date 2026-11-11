@@ -28,6 +28,19 @@ std::u16string normalizeWhitespace(const std::u16string& in) {
     return out;
 }
 
+// Comparison ignores whitespace entirely: PDFium may or may not emit a space
+// character for the same visual word gap, and the editor infers one from the
+// geometry. "KOFORIDUA TECHNICAL" and "KOFORIDUATECHNICAL" are the same line.
+std::u16string compactForMatch(const std::u16string& in) {
+    std::u16string out;
+    out.reserve(in.size());
+    for (char16_t c : in) {
+        if (c == u' ' || c == u'\t' || c == u'\r' || c == u'\n') continue;
+        out.push_back(c);
+    }
+    return out;
+}
+
 std::u16string textObjectText(FPDF_PAGEOBJECT object, FPDF_TEXTPAGE textPage) {
     if (!object || !textPage) return {};
     // With a null buffer this returns the required size in BYTES, including the
@@ -198,7 +211,7 @@ int findTextObject(EditingDocument* doc, int pageIndex,
         return -1;
     }
 
-    const std::u16string wanted = normalizeWhitespace(text);
+    const std::u16string wanted = compactForMatch(text);
     const int count = FPDFPage_CountObjects(page);
     int found = -1;
     int matches = 0;
@@ -219,7 +232,7 @@ int findTextObject(EditingDocument* doc, int pageIndex,
                             left, bottom, right, top) < kMinOverlapFraction) {
             continue;
         }
-        if (textObjectText(object, textPage) != wanted) continue;
+        if (compactForMatch(textObjectText(object, textPage)) != wanted) continue;
 
         found = i;
         ++matches;
