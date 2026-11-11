@@ -19,7 +19,11 @@ import com.redraft.pdfcore.ViewportState
 import com.redraft.pdfcore.selection.CharBox
 import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.pdfcore.selection.PageTextLayout
+import com.redraft.pdfcore.selection.TextFragment
+import com.redraft.pdfcore.selection.TextLine
 import com.redraft.pdfcore.selection.TextPageLayout
+import com.redraft.pdfcore.selection.TextStyle
+import com.redraft.ui.viewer.SelectionOverlayState
 import com.redraft.pdfedit.EditingHandle
 import com.redraft.pdfedit.FontHandle
 import com.redraft.pdfedit.PdfEditingEngine
@@ -112,11 +116,18 @@ class PdfViewerViewModelTest {
     }
 
     private class FakeEditingEngine : PdfEditingEngine {
+        val setTextCalls = mutableListOf<Triple<Int, Int, String>>()
+        var findTextObjectResult = 0
+
         override suspend fun open(uri: android.net.Uri, pfd: android.os.ParcelFileDescriptor): Result<EditingHandle> =
             Result.success(EditingHandle(0))
         override suspend fun close(handle: EditingHandle) {}
-        override suspend fun setText(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String): Boolean = true
-        override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray) {}
+        override suspend fun setText(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String): Boolean {
+            setTextCalls += Triple(pageIndex, objectIndex, newText)
+            return true
+        }
+        override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray): Boolean = true
+        override suspend fun findTextObject(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float, text: String): Int = findTextObjectResult
         override suspend fun saveAsCopy(handle: EditingHandle, destPath: String): Boolean = true
         override suspend fun loadBundledFont(handle: EditingHandle, fontName: String, bold: Boolean, italic: Boolean): FontHandle = FontHandle(0)
         override suspend fun getTextObjectCount(handle: EditingHandle, pageIndex: Int): Int = 0
@@ -127,6 +138,7 @@ class PdfViewerViewModelTest {
         recents: RecentsStore,
         log: MutableList<String> = mutableListOf(),
         extractor: suspend (DocumentHandle, Int) -> PageTextLayout = { _, _ -> PageTextLayout.Empty },
+        engine: FakeEditingEngine = FakeEditingEngine(),
         opener: (String) -> Result<DocumentHandle>,
     ): PdfViewerViewModel = PdfViewerViewModel(
         recentsRepository = recents,
@@ -137,7 +149,7 @@ class PdfViewerViewModelTest {
         cleanupScope = CoroutineScope(SupervisorJob() + dispatcher),
         computeDispatcher = dispatcher,
         extractPageText = extractor,
-        editingEngineFactory = { FakeEditingEngine() },
+        editingEngineFactory = { engine },
         contentResolverProvider = null,
     )
 
@@ -517,6 +529,188 @@ class PdfViewerViewModelTest {
         assertEquals(false, vm.editMode.value)
         assertEquals(0, vm.cachedLayoutCount)
         assertEquals(0, vm.activeExtractionCount)
+    }
+
+    // ─── Edit-text entry point (Task 3) and Apply wiring (Task 4) ────────────
+
+    /** A selection whose line is [text]; [editable] mirrors the line's fragment. */
+    private fun selectionFor(text: String, editable: Boolean = true): SelectionOverlayState {
+        val chars = text.mapIndexed { i, c ->
+            CharBox(
+                index = i,
+                text = c.toString(),
+                rect = PdfRect(100f + i * 10f, 700f, 110f + i * 10f, 710f),
+                fontSizePt = 10f,
+            )
+        }
+        val fragment = TextFragment(
+            chars = chars,
+            style = TextStyle(fontSizePt = 10f, baselineY = 700f),
+            editable = editable,
+        )
+        return SelectionOverlayState(
+            selectedLine = TextLine(
+                chars = chars,
+                rect = PdfRect(100f, 700f, 100f + chars.size * 10f, 710f),
+                fragment = fragment,
+            ),
+            blockId = "p0:b0",
+            editable = editable,
+            pageIndex = 0,
+        )
+    }
+
+    @Test
+    fun edit_text_with_nothing_selected_reports_nothing_selected() = runTest(dispatcher) {
+        val received = mutableListOf<ViewerMessage>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+        )
+        backgroundScope.collectMessages(vm, received)
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+
+        vm.onEditText()
+        runCurrent()
+
+        assertEquals(listOf(ViewerMessage.NothingSelected), received)
+    }
+
+    @Test
+    fun edit_text_on_a_non_editable_line_reports_why() = runTest(dispatcher) {
+        val received = mutableListOf<ViewerMessage>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+        )
+        backgroundScope.collectMessages(vm, received)
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("Hi", editable = false))
+
+        vm.onEditText()
+        runCurrent()
+
+        assertEquals(listOf(ViewerMessage.LineNotEditable), received)
+    }
+
+    @Test
+    fun edit_text_without_a_document_reports_page_text_not_ready() = runTest(dispatcher) {
+        val received = mutableListOf<ViewerMessage>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+        )
+        backgroundScope.collectMessages(vm, received)
+        runCurrent()
+        vm.updateSelection(selectionFor("Hi"))
+
+        vm.onEditText()
+        runCurrent()
+
+        assertEquals(listOf(ViewerMessage.PageTextNotReady), received)
+    }
+
+    @Test
+    fun edit_text_re_extracts_a_missing_layout_and_opens_the_editor() = runTest(dispatcher) {
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        // A selection with no cached layout: the old code returned silently here.
+        vm.updateSelection(selectionFor("H"))
+
+        vm.onEditText()
+        advanceUntilIdle()
+
+        assertNotNull("the editor must open after re-extracting the page", vm.editorState.value)
+        assertEquals("H", vm.editorState.value?.originalText)
+    }
+
+    @Test
+    fun apply_without_an_editing_session_reports_editing_unavailable() = runTest(dispatcher) {
+        val received = mutableListOf<ViewerMessage>()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+        )
+        backgroundScope.collectMessages(vm, received)
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.onEditText()
+        advanceUntilIdle()
+        assertNotNull(vm.editorState.value)
+
+        vm.onApplyEdit("J")
+        runCurrent()
+
+        assertTrue(
+            "Apply must say why instead of returning silently",
+            ViewerMessage.EditingUnavailable in received,
+        )
+    }
+
+    @Test
+    fun a_missing_native_module_does_not_stop_the_viewer_opening() = runTest(dispatcher) {
+        val vm = PdfViewerViewModel(
+            recentsRepository = FakeRecents(),
+            openDocument = { Result.success(FakeHandle(2, "doc", mutableListOf())) },
+            resolveDisplayName = { "doc" },
+            clock = { 0L },
+            ioDispatcher = dispatcher,
+            cleanupScope = CoroutineScope(SupervisorJob() + dispatcher),
+            computeDispatcher = dispatcher,
+            extractPageText = { _, _ -> PageTextLayout.Empty },
+            editingEngineFactory = { throw UnsatisfiedLinkError("libpdfedit is not built") },
+            contentResolverProvider = { throw UnsatisfiedLinkError("libpdfedit is not built") },
+        )
+
+        vm.open("uri")
+        advanceUntilIdle()
+
+        assertEquals(2, vm.uiState.value.pageCount)
+        assertNull(vm.uiState.value.error)
+        assertNotNull("the document must stay open", vm.handle.value)
+    }
+
+    @Test
+    fun apply_reaches_the_editing_engine() = runTest(dispatcher) {
+        val engine = FakeEditingEngine()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.onTap(tapOnText, 0, viewport, transform, tolerance)
+        runCurrent()
+        assertNotNull(vm.selectionState.value)
+        vm.onEditText()
+        runCurrent()
+        assertNotNull(vm.editorState.value)
+
+        // The production path needs a real ContentResolver; attach the same fake
+        // engine the ViewModel would have opened.
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+
+        vm.onApplyEdit("J")
+        advanceUntilIdle()
+
+        assertEquals(1, engine.setTextCalls.size)
+        assertEquals("J", engine.setTextCalls.single().third)
     }
 
     /** Collects the ViewModel's one-shot messages into [into]. */
