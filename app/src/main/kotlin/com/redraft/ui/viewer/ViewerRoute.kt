@@ -182,6 +182,14 @@ fun ViewerRoute(
                 // chrome (D-19).
                 if (!editMode) barsVisible = !barsVisible
             },
+            draftText = editorState?.draftText.orEmpty(),
+            onTextChange = { newText ->
+                viewModel.updateEditorState(
+                    editorState?.withDraftText(newText) ?: EditorPanelState(
+                        originalText = "", draftText = newText, fontSizePt = 12f, textColor = 0xFF000000.toInt(),
+                    ),
+                )
+            },
             topContentPadding = topBarSpace,
             modifier = Modifier.fillMaxSize(),
         )

@@ -3,6 +3,7 @@ package com.redraft.ui.viewer
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
@@ -22,6 +23,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -37,6 +39,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
@@ -47,9 +50,12 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.redraft.data.DocumentHandle
 import com.redraft.pdfcore.PdfPageGeometry
@@ -80,6 +86,9 @@ fun PdfViewerScreen(
     onSingleTap: () -> Unit = {},
     // Space at the top that a floating app bar occupies; page 1 starts just below it.
     topContentPadding: Dp = 0.dp,
+    // The current editor draft text and change callback for the in-place field (Task 4b).
+    draftText: String = "",
+    onTextChange: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -257,6 +266,8 @@ fun PdfViewerScreen(
                         tapTolerance = tapTolerance,
                         editMode = editMode,
                         viewModel = viewModel,
+                        draftText = draftText,
+                        onTextChange = onTextChange,
                         onTap = { tapScreen, pageIdx, viewport, transform, tolerance ->
                             viewModel.onTap(tapScreen, pageIdx, viewport, transform, tolerance)
                         },
@@ -480,6 +491,8 @@ private fun PdfPageItem(
     tapTolerance: TapTolerance,
     editMode: Boolean,
     viewModel: PdfViewerViewModel,
+    draftText: String,
+    onTextChange: (String) -> Unit,
     onTap: (PdfPoint, Int, ViewportState, PdfViewportTransform, TapTolerance) -> Unit,
     onDoubleTapSelectedLine: () -> Unit,
     modifier: Modifier = Modifier,
@@ -760,6 +773,47 @@ private fun PdfPageItem(
                         viewport = latestViewport.value,
                         transform = latestTransform.value,
                     )
+
+                    // In-place editor field drawn over the selected line (Task 4b).
+                    // Positioned using the same pdf→screen transform as the selection overlay
+                    // so the field lands exactly on the line's glyph bounds.
+                    if (editMode && selectionState?.selectedLine != null) {
+                        val line = selectionState.selectedLine
+                        val rect = line.rect
+                        val start = latestTransform.value.pdfToScreen(
+                            PdfPoint(rect.minX, rect.maxY), latestViewport.value
+                        )
+                        val end = latestTransform.value.pdfToScreen(
+                            PdfPoint(rect.maxX, rect.minY), latestViewport.value
+                        )
+                        val fieldWidth = (end.x - start.x).coerceAtLeast(40f)
+                        val fieldHeight = (start.y - end.y).coerceAtLeast(24f)
+
+                        Box(
+                            modifier = Modifier
+                                .offset { IntOffset(start.x.roundToInt(), start.y.roundToInt()) }
+                                .requiredSize(
+                                    width = fieldWidth.dp,
+                                    height = fieldHeight.dp,
+                                )
+                                .background(Color(0xFFFFFFFF)) // opaque paper-colour patch
+                                .semantics { contentDescription = "in-place text field" },
+                        ) {
+                            BasicTextField(
+                                value = draftText,
+                                onValueChange = onTextChange,
+                                modifier = Modifier.fillMaxSize(),
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    fontSize = line.fragment.style.fontSizePt.coerceIn(8f, 72f).sp,
+                                    color = Color(
+                                        line.fragment.style.fillColor
+                                            ?: 0xFF000000.toInt(),
+                                    ),
+                                ),
+                            )
+                        }
+                    }
                 }
             }
         }
