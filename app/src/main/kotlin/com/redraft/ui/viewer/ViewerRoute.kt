@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,6 +27,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -74,6 +76,9 @@ fun ViewerRoute(
     val editMode by viewModel.editMode.collectAsStateWithLifecycle()
     val selection by viewModel.selectionState.collectAsStateWithLifecycle()
     val editorState by viewModel.editorState.collectAsStateWithLifecycle()
+    val pastCommands by viewModel.pastCommands.collectAsStateWithLifecycle()
+    val futureCommands by viewModel.futureCommands.collectAsStateWithLifecycle()
+    var showUnsavedDialog by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val view = LocalView.current
 
@@ -206,6 +211,10 @@ fun ViewerRoute(
                 onNothingSelected = {
                     scope.launch { snackbarHostState.showSnackbar(nothingSelected) }
                 },
+                canUndo = pastCommands.isNotEmpty(),
+                canRedo = futureCommands.isNotEmpty(),
+                onUndo = { viewModel.onUndo() },
+                onRedo = { viewModel.onRedo() },
                 onCannotEdit = {
                     scope.launch { snackbarHostState.showSnackbar(lineNotEditable) }
                 },
@@ -256,6 +265,29 @@ fun ViewerRoute(
     // Back handling in Edit mode (D-20, D-301): editor panel is dismissed first,
     // then a selected line is cleared, then Edit mode is left, then the viewer is left.
     // The handler is enabled ONLY while Edit mode is on.
+    // Leaving with unsaved edits asks first. The original file is never modified.
+    BackHandler(enabled = !editMode && pastCommands.isNotEmpty()) { showUnsavedDialog = true }
+    if (showUnsavedDialog) {
+        AlertDialog(
+            onDismissRequest = { showUnsavedDialog = false },
+            title = { Text(stringResource(R.string.unsaved_edits_title)) },
+            text = { Text(stringResource(R.string.unsaved_edits_message)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showUnsavedDialog = false
+                        onBack()
+                    },
+                ) { Text(stringResource(R.string.leave_without_saving)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUnsavedDialog = false }) {
+                    Text(stringResource(R.string.keep_editing))
+                }
+            },
+        )
+    }
+
     BackHandler(enabled = editMode) {
         val currentSelection = selection
         if (editorState != null) viewModel.dismissEditor()
@@ -289,6 +321,10 @@ internal fun ViewerTopBar(
     onEditText: () -> Unit,
     onNothingSelected: () -> Unit,
     onCannotEdit: () -> Unit,
+    onUndo: () -> Unit = {},
+    onRedo: () -> Unit = {},
+    canUndo: Boolean = false,
+    canRedo: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     TopAppBar(
@@ -357,6 +393,18 @@ internal fun ViewerTopBar(
             // "Edit text" — a DIFFERENT glyph from the Edit-mode pencil, only in
             // Edit mode, and always tappable so an unavailable action can say why.
             if (editMode) {
+                IconButton(onClick = onUndo, enabled = canUndo) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_undo),
+                        contentDescription = stringResource(R.string.cd_undo),
+                    )
+                }
+                IconButton(onClick = onRedo, enabled = canRedo) {
+                    Icon(
+                        painter = painterResource(R.drawable.ic_redo),
+                        contentDescription = stringResource(R.string.cd_redo),
+                    )
+                }
                 val editDesc = if (canEditSelection) {
                     stringResource(R.string.edit_selected_text)
                 } else {
