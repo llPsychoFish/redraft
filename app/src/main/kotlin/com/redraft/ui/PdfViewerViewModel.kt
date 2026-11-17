@@ -904,11 +904,14 @@ class PdfViewerViewModel(
         // Full font fallback analysis (D-304)
         // The text objects are the source of truth. PDFium may store no space
         // character between words, and the character boxes then have to guess.
+        // On some devices PDFium's FPDFTextObj_GetText can truncate glyphs, so
+        // compare the native result with the character-box inference and use
+        // whichever is more complete (more non-whitespace characters).
         val boxText = editableLineText(line)
         val handle = editingHandle
         val engine = editingEngine
         var objects = 0
-        val originalText = if (handle != null && engine != null) {
+        val nativeText = if (handle != null && engine != null) {
             objects = runCatching {
                 engine.lineObjectCount(
                     handle, selection.pageIndex,
@@ -920,11 +923,20 @@ class PdfViewerViewModel(
                     handle, selection.pageIndex,
                     line.rect.minX, line.rect.minY, line.rect.maxX, line.rect.maxY,
                 )
-            }.getOrDefault("").ifBlank { boxText }
+            }.getOrDefault("")
         } else {
-            boxText
+            ""
         }
-        Log.d(TAG_EDIT, "editor text='$originalText' objects=$objects boxes='$boxText'")
+        // Pick the text with more non-whitespace characters: native text objects
+        // are authoritative, but character-box inference fills in when PDFium
+        // truncates glyphs on some devices.
+        val nativeCompact = nativeText.replace(Regex("\\s"), "")
+        val boxCompact = boxText.replace(Regex("\\s"), "")
+        val originalText = if (nativeCompact.length >= boxCompact.length) nativeText else boxText
+        Log.d(
+            TAG_EDIT,
+            "editor text='$originalText' native='$nativeText' boxes='$boxText' objects=$objects",
+        )
         val fontName = fragment.style.fontName ?: ""
         val fontAnalysis = fontAnalysisOf(fontName)
         

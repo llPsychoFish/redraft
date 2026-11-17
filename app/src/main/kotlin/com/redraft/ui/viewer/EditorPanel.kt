@@ -128,7 +128,9 @@ fun EditorPanel(
             )
         }
 
-        // Single-line TextField with proper IME options
+        // Single-line TextField that scrolls horizontally when text is longer than
+        // the field. Uses the effective font size (includes user formatting changes)
+        // so the preview matches what will be applied.
         val editingDesc = stringResource(R.string.cd_editing_line, state.originalText.take(30))
         TextField(
             value = state.draftText,
@@ -143,11 +145,10 @@ fun EditorPanel(
                 imeAction = ImeAction.Done,
                 capitalization = KeyboardCapitalization.Sentences,
             ),
-            // The preview uses the theme's readable colour, never the document's:
-            // painting black PDF text on this dark panel made the draft invisible.
-            // The size is clamped so a large heading still fits the field.
+            // Show the draft at its effective size (includes user's size/bold/italic
+            // changes). Do not clamp - let the field scroll horizontally for long text.
             textStyle = MaterialTheme.typography.bodyLarge.copy(
-                fontSize = state.fontSizePt.coerceIn(12f, 20f).sp,
+                fontSize = state.effectiveFontSizePt.sp,
             ),
             interactionSource = remember { MutableInteractionSource() },
         )
