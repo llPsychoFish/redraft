@@ -7,6 +7,7 @@
 
 #include <android/log.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <string>
 #include <vector>
 
@@ -44,9 +45,21 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeOpen(
         }
         if (rawFd < 0) return 0;
 
+        // SAF providers do not always know the size (statSize == -1), so the
+        // descriptor itself is the authority when the length is missing.
+        long resolvedLength = static_cast<long>(length);
+        if (resolvedLength <= 0) {
+            struct stat fileStat = {};
+            if (fstat(rawFd, &fileStat) == 0) resolvedLength = static_cast<long>(fileStat.st_size);
+        }
+        if (resolvedLength <= 0) {
+            LOG_W("nativeOpen: the document length is unknown");
+            return 0;
+        }
+
         auto* document = new EditingDocument(static_cast<int>(rawFd),
                                              static_cast<long>(offset),
-                                             static_cast<long>(length));
+                                             resolvedLength);
         if (!document->docPtr()) {
             LOG_W("FPDF_LoadCustomDocument failed (error %lu)", FPDF_GetLastError());
             delete document;

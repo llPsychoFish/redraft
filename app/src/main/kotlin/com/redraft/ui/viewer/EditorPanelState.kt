@@ -25,6 +25,8 @@ data class EditorPanelState(
     val applyInProgress: Boolean = false,
     /** Why the last Apply failed; shown inside the panel, never only in a snackbar. */
     val applyError: EditorEditFailure? = null,
+    /** Technical detail for the failure (e.g. the library/loader error). */
+    val applyErrorDetail: String? = null,
     /** How many PDF text objects the line is made of; 0 until the engine reports it. */
     val lineObjectCount: Int = 0,
 ) {

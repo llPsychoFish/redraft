@@ -155,6 +155,14 @@ fun EditorPanel(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             )
         }
+        state.applyErrorDetail?.let { detail ->
+            Text(
+                text = detail,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            )
+        }
 
         // Apply / Cancel buttons
         Row(

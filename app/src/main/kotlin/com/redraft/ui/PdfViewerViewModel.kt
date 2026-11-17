@@ -440,6 +440,8 @@ class PdfViewerViewModel(
     private var editingEngine: com.redraft.pdfedit.PdfEditingEngine? = null
     private var editingHandle: EditingHandle? = null
     private var editingHandleJob: Job? = null
+    /** Why the editing session could not open; shown in the panel for diagnosis. */
+    private var editingUnavailableReason: String? = null
     // The "editing unavailable" snackbar is shown once per open document, not on every tap.
     private var editingUnavailableNotified = false
 
@@ -844,6 +846,9 @@ class PdfViewerViewModel(
 
     /** Builds the editor state from the current selection (its layout must be cached). */
     private suspend fun openEditorForSelection() {
+        // The editing session opens in parallel with the document; wait for it
+        // instead of reporting "unavailable" just because it is still starting.
+        runCatching { editingHandleJob?.join() }
         val selection = _selectionState.value ?: return
         val line = selection.selectedLine ?: return
         val fragment = line.fragment
@@ -919,7 +924,7 @@ class PdfViewerViewModel(
         val engine = editingEngine
         if (handle == null || engine == null) {
             notifyEditingUnavailable("apply")
-            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_ENGINE)
+            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_ENGINE, editingUnavailableReason)
             return
         }
         val line = selection.selectedLine
@@ -1039,10 +1044,17 @@ class PdfViewerViewModel(
     }
 
     /** Shows an Apply failure inside the panel and keeps the draft. */
-    private fun failEdit(reason: com.redraft.ui.viewer.EditorEditFailure) {
+    private fun failEdit(
+        reason: com.redraft.ui.viewer.EditorEditFailure,
+        detail: String? = null,
+    ) {
         val state = _editorState.value ?: return
-        _editorState.value = state.copy(applyInProgress = false, applyError = reason)
-        Log.d(TAG_EDIT, "apply failed: $reason")
+        _editorState.value = state.copy(
+            applyInProgress = false,
+            applyError = reason,
+            applyErrorDetail = detail,
+        )
+        Log.d(TAG_EDIT, "apply failed: $reason ($detail)")
     }
 
     fun onUndo() { popAndExecute(_past, _future, inverse = true) }
@@ -1437,9 +1449,11 @@ class PdfViewerViewModel(
                     onSuccess = { opened ->
                         editingEngine = engine
                         editingHandle = opened
+                        editingUnavailableReason = null
                         Log.d(TAG_EDIT, "openEditingSession: editing document open")
                     },
                     onFailure = { error ->
+                        editingUnavailableReason = error.message ?: error::class.simpleName
                         Log.w(TAG_EDIT, "openEditingSession: could not open the editing document", error)
                     },
                 )
@@ -1447,6 +1461,7 @@ class PdfViewerViewModel(
         } catch (error: Throwable) {
             // Includes UnsatisfiedLinkError: the native editing module is absent.
             Log.w(TAG_EDIT, "openEditingSession: editing unavailable", error)
+            editingUnavailableReason = error.message ?: error::class.simpleName ?: "unknown error"
             editingEngine = null
             editingHandle = null
         }

@@ -155,16 +155,12 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
             // descriptor points at the start of the PDF. Passing the size as the
             // offset left the editing document unopened, so Apply silently did
             // nothing on every document.
-            val length = pfd.statSize
-            if (length <= 0L) {
-                Result.failure(IllegalStateException("The document size is unknown"))
+            // A provider may report statSize == -1; nativeOpen then asks fstat.
+            val handle = nativeOpen(uri.toString(), pfd, 0L, pfd.statSize)
+            if (handle == 0L) {
+                Result.failure(IllegalStateException("PDFium could not open the document for editing"))
             } else {
-                val handle = nativeOpen(uri.toString(), pfd, 0L, length)
-                if (handle == 0L) {
-                    Result.failure(IllegalStateException("PDFium could not open the document for editing"))
-                } else {
-                    Result.success(EditingHandle(handle))
-                }
+                Result.success(EditingHandle(handle))
             }
         } catch (e: Throwable) {
             Result.failure(e)
