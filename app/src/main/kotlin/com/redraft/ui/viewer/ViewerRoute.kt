@@ -39,6 +39,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
@@ -240,6 +242,9 @@ fun ViewerRoute(
                         // the new draft; the UI must not duplicate that logic.
                         viewModel.updateEditorState(state.withDraftText(newText))
                     },
+                    onFormatChange = { newState ->
+                        viewModel.updateEditorState(newState)
+                    },
                     onApply = { viewModel.onApplyEdit(state.draftText) },
                     onCancel = { viewModel.dismissEditor() },
                     modifier = Modifier
@@ -260,6 +265,18 @@ fun ViewerRoute(
                 .navigationBarsPadding()
                 .padding(bottom = 72.dp),
         )
+
+        // Auto-zoom to the selected line when the editor opens (Task 4a).
+        // Restore happens in dismissEditor() / endEditSession().
+        val density = LocalDensity.current
+        val config = LocalConfiguration.current
+        val viewportWidthPx = (config.screenWidthDp * density.density).toInt()
+        LaunchedEffect(editorState, selection, viewportWidthPx) {
+            if (editorState != null) {
+                val lineRect = selection?.selectedLine?.rect ?: return@LaunchedEffect
+                viewModel.zoomToLine(lineRect, viewportWidthPx)
+            }
+        }
     }
 
     // Back handling in Edit mode (D-20, D-301): editor panel is dismissed first,

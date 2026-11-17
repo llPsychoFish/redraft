@@ -445,6 +445,10 @@ class PdfViewerViewModel(
     // The "editing unavailable" snackbar is shown once per open document, not on every tap.
     private var editingUnavailableNotified = false
 
+    // Zoom/pan saved when the editor opens, restored when it closes (Task 4a).
+    private var savedZoom: Float = 1f
+    private var savedPanX: Float = 0f
+
     // Render scope for cancelling in-flight renders on document swap
     private var renderJob = SupervisorJob()
     private val renderScope = CoroutineScope(renderJob + ioDispatcher)
@@ -742,7 +746,44 @@ class PdfViewerViewModel(
 
     /** Dismisses the inline editor without committing changes. */
     fun dismissEditor() {
+        endEditSession()
         _editorState.value = null
+    }
+
+    /** Saves the current zoom/pan so they can be restored when the editor closes (Task 4a). */
+    internal fun startEditSession() {
+        savedZoom = _uiState.value.zoom
+        savedPanX = _uiState.value.panX
+    }
+
+    /** Restores the zoom/pan that was active when the editor opened (Task 4a). */
+    internal fun endEditSession() {
+        _uiState.update { it.copy(zoom = savedZoom, panX = savedPanX) }
+    }
+
+    /**
+     * Auto-zoom: fit [lineRect] horizontally to 90% of the viewport and center panX on it
+     * (Task 4a). Called when the editor opens so the selected line is visible above the keyboard.
+     */
+    internal fun zoomToLine(lineRect: PdfRect, viewportWidthPx: Int) {
+        val pageIndex = _selectionState.value?.pageIndex ?: return
+        val pageSize = _uiState.value.pageSizes.firstOrNull { it.pageIndex == pageIndex } ?: return
+        val lineWidth = lineRect.width
+        if (lineWidth <= 0f) return
+
+        // At zoom z, screen width of line = lineWidth * z * baseWidthPx / widthPt
+        // We want screen width = 0.9 * viewportWidthPx
+        // z = 0.9 * viewportWidthPx * widthPt / (lineWidth * baseWidthPx)
+        val baseSize = pageSize.slotBaseSizePx(viewportWidthPx)
+        val targetZoom = 0.9f * viewportWidthPx * pageSize.widthPt / (lineWidth * baseSize.widthPx.toFloat())
+        val clampedZoom = clampZoom(targetZoom)
+
+        // Center panX on the line's center point
+        val scaleX = clampedZoom * baseSize.widthPx.toFloat() / pageSize.widthPt
+        val lineCenter = (lineRect.minX + lineRect.maxX) / 2f
+        val targetPanX = viewportWidthPx.toFloat() / 2f - lineCenter * scaleX
+
+        _uiState.update { it.copy(zoom = clampedZoom, panX = targetPanX) }
     }
 
     /** Updates the selection state (used for reselection after edit). */
@@ -791,9 +832,14 @@ class PdfViewerViewModel(
         // The 1.2x length check is a NOTICE only: it must not disable Apply.
         // An empty draft cannot match a text object; allowing Apply would only
         // produce "Cannot edit this line safely".
+        val formattingChanged =
+            newState.effectiveFontSizePt != editor.fontSizePt ||
+                newState.selectedBold != editor.selectedBold ||
+                newState.selectedItalic != editor.selectedItalic ||
+                newState.effectiveColor != editor.textColor
         val canApply = fallbackDecision != FontFallbackDecision.UNSUPPORTED_CHARS &&
             newState.draftText.isNotBlank() &&
-            newState.draftText != editor.originalText
+            (newState.draftText != editor.originalText || formattingChanged)
 
         _editorState.value = newState.copy(
             fontChangeNotice = fontChangeNotice,
@@ -846,6 +892,8 @@ class PdfViewerViewModel(
 
     /** Builds the editor state from the current selection (its layout must be cached). */
     private suspend fun openEditorForSelection() {
+        // Save zoom/pan so they can be restored when the editor closes (Task 4a).
+        startEditSession()
         // The editing session opens in parallel with the document; wait for it
         // instead of reporting "unavailable" just because it is still starting.
         runCatching { editingHandleJob?.join() }
@@ -948,17 +996,37 @@ class PdfViewerViewModel(
             else -> fontName
         }
 
+        // Formatting changes (size/bold/italic/colour) force a replacement object.
+        val formattingChanged =
+            editor.effectiveFontSizePt != editor.fontSizePt ||
+                editor.selectedBold ||
+                editor.selectedItalic ||
+                editor.effectiveColor != editor.textColor
+
         // Every outcome is shown inside the panel; the editor never fails silently.
         _editorState.value = editor.copy(applyInProgress = true, applyError = null)
 
         viewModelScope.launch {
             try {
-                val fontHandle = if (fallbackDecision == FontFallbackDecision.USE_BUNDLED_FALLBACK) {
-                    fontCache.getOrPut(newFontName) {
-                        engine.loadBundledFont(handle, newFontName, fontAnalysis.bold, fontAnalysis.italic)
+                val fontHandle = when {
+                    fallbackDecision == FontFallbackDecision.USE_BUNDLED_FALLBACK -> {
+                        fontCache.getOrPut(newFontName) {
+                            engine.loadBundledFont(handle, newFontName, fontAnalysis.bold, fontAnalysis.italic)
+                        }
                     }
-                } else {
-                    FontHandle(0)
+                    formattingChanged -> {
+                        // User changed bold/italic: load the appropriate bundled font.
+                        val bundleFontName = when {
+                            editor.selectedBold && editor.selectedItalic -> "LiberationSans-BoldItalic"
+                            editor.selectedBold -> "LiberationSans-Bold"
+                            editor.selectedItalic -> "LiberationSans-Italic"
+                            else -> "LiberationSans-Regular"
+                        }
+                        fontCache.getOrPut(bundleFontName) {
+                            engine.loadBundledFont(handle, bundleFontName, editor.selectedBold, editor.selectedItalic)
+                        }
+                    }
+                    else -> FontHandle(0)
                 }
 
                 val count = engine.lineObjectCount(
@@ -982,8 +1050,8 @@ class PdfViewerViewModel(
                     newText = newText,
                     oldFontName = fontName,
                     newFontName = newFontName,
-                    fontSizePt = editor.fontSizePt,
-                    color = editor.textColor,
+                    fontSizePt = editor.effectiveFontSizePt,
+                    color = editor.effectiveColor,
                     baselineRect = rect,
                     matrix = floatArrayOf(1f, 0f, 0f, 1f, rect.minX, rect.minY),
                 )
@@ -998,9 +1066,10 @@ class PdfViewerViewModel(
                     expectedText = editor.originalText,
                     newText = newText,
                     fontHandle = fontHandle,
-                    fontSizePt = editor.fontSizePt,
-                    color = editor.textColor,
+                    fontSizePt = editor.effectiveFontSizePt,
+                    color = editor.effectiveColor,
                     matrix = cmd.matrix,
+                    forceReplace = formattingChanged,
                 )
                 Log.d(TAG_EDIT, "apply: editLine -> $outcome")
                 when (outcome) {
@@ -1034,6 +1103,7 @@ class PdfViewerViewModel(
                 _pastFlow.value = _past.toList()
                 _future.clear()
                 _futureFlow.value = emptyList()
+                endEditSession()
                 _editorState.value = null
                 triggerReRender(selection.pageIndex)
             } catch (e: Throwable) {
@@ -1108,6 +1178,7 @@ class PdfViewerViewModel(
             handle, cmd.pageIndex,
             rect.minX, rect.minY, rect.maxX, rect.maxY,
             cmd.oldText, cmd.newText, fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix,
+            forceReplace = cmd.newFontName.startsWith("Liberation"),
         )
         Log.d(TAG_EDIT, "undo/redo: editLine -> $outcome")
         if (outcome != com.redraft.pdfedit.LineEditOutcome.OK) {

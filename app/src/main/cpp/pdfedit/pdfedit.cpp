@@ -29,7 +29,7 @@ static std::u16string jstringToUtf16(JNIEnv* env, jstring value) {
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeOpen(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeOpen(
     JNIEnv* env, jclass, jstring, jobject fd, jlong offset, jlong length) {
     try {
         if (!fd) return 0;
@@ -73,7 +73,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeOpen(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeClose(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeClose(
     JNIEnv*, jclass, jlong handle) {
     try {
         delete reinterpret_cast<EditingHandle>(handle);
@@ -83,7 +83,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeClose(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeSetText(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeSetText(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex, jstring newText) {
     try {
         auto* document = reinterpret_cast<EditingHandle>(handle);
@@ -98,7 +98,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeSetText(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeReplaceTextObject(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeReplaceTextObject(
     JNIEnv* env, jclass, jlong handle, jint pageIndex, jint objectIndex,
     jstring newText, jlong fontHandle, jfloat fontSizePt, jint color, jfloatArray matrix) {
     jfloat* matrixValues = nullptr;
@@ -134,7 +134,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeReplaceTextObject(
 }
 
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeSaveAsCopy(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeSaveAsCopy(
     JNIEnv* env, jclass, jlong handle, jstring destPath) {
     try {
         auto* document = reinterpret_cast<EditingHandle>(handle);
@@ -151,7 +151,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeSaveAsCopy(
 }
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeLoadBundledFont(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeLoadBundledFont(
     JNIEnv* env, jclass, jlong handle, jstring fontName, jboolean, jboolean, jbyteArray fontData) {
     jbyte* data = nullptr;
     try {
@@ -183,7 +183,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeLoadBundledFont(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeGetTextObjectCount(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeGetTextObjectCount(
     JNIEnv*, jclass, jlong handle, jint pageIndex) {
     try {
         auto* document = reinterpret_cast<EditingHandle>(handle);
@@ -195,7 +195,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeGetTextObjectCount(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeGetTextObjectCharCount(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeGetTextObjectCharCount(
     JNIEnv*, jclass, jlong handle, jint pageIndex, jint objectIndex) {
     try {
         auto* document = reinterpret_cast<EditingHandle>(handle);
@@ -207,7 +207,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeGetTextObjectCharCount(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeFindTextObject(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeFindTextObject(
     JNIEnv* env, jclass, jlong handle, jint pageIndex,
     jfloat left, jfloat top, jfloat right, jfloat bottom, jstring text) {
     try {
@@ -228,7 +228,7 @@ static jstring utf16ToJString(JNIEnv* env, const std::u16string& text) {
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeLineText(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeLineText(
     JNIEnv* env, jclass, jlong handle, jint pageIndex,
     jfloat left, jfloat top, jfloat right, jfloat bottom) {
     try {
@@ -244,7 +244,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeLineText(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeLineObjectCount(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeLineObjectCount(
     JNIEnv*, jclass, jlong handle, jint pageIndex,
     jfloat left, jfloat top, jfloat right, jfloat bottom) {
     try {
@@ -259,7 +259,7 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeLineObjectCount(
 }
 
 extern "C" JNIEXPORT jint JNICALL
-Java_com_redraft_pdfedit_PdfEditingEngine_nativeEditLine(
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeEditLine(
     JNIEnv* env, jclass, jlong handle, jint pageIndex,
     jfloat left, jfloat top, jfloat right, jfloat bottom,
     jstring expectedText, jstring newText, jlong fontHandle,

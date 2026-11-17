@@ -2,6 +2,7 @@ package com.redraft.ui.viewer
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -9,13 +10,16 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -34,6 +38,8 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -46,6 +52,7 @@ import kotlinx.coroutines.delay
 fun EditorPanel(
     state: EditorPanelState,
     onTextChange: (String) -> Unit,
+    onFormatChange: (EditorPanelState) -> Unit,
     onApply: () -> Unit,
     onCancel: () -> Unit,
     modifier: Modifier = Modifier,
@@ -162,6 +169,110 @@ fun EditorPanel(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
             )
+        }
+
+        // Format bar: size, bold, italic, colour (one row, horizontally scrollable on small screens)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Font size controls
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = {
+                        val newSize = (state.effectiveFontSizePt - 2f).coerceAtLeast(6f)
+                        onFormatChange(state.copy(selectedFontSizePt = newSize))
+                    },
+                    enabled = state.effectiveFontSizePt > 6f,
+                ) {
+                    Text(text = "A−", style = MaterialTheme.typography.bodyMedium)
+                }
+                Text(
+                    text = "%.0f pt".format(state.effectiveFontSizePt),
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+                TextButton(
+                    onClick = {
+                        onFormatChange(state.copy(selectedFontSizePt = state.effectiveFontSizePt + 2f))
+                    },
+                ) {
+                    Text(text = "A+", style = MaterialTheme.typography.bodyMedium)
+                }
+            }
+
+            Spacer(Modifier.width(1.dp).height(20.dp))
+
+            // Bold
+            Button(
+                onClick = { onFormatChange(state.copy(selectedBold = !state.selectedBold)) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.selectedBold) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                ),
+            ) {
+                Text(
+                    text = "B",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = if (state.selectedBold) FontWeight.Bold else FontWeight.Normal,
+                    ),
+                )
+            }
+
+            // Italic
+            Button(
+                onClick = { onFormatChange(state.copy(selectedItalic = !state.selectedItalic)) },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (state.selectedItalic) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.surfaceContainerHigh
+                    },
+                ),
+            ) {
+                Text(
+                    text = "I",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontStyle = if (state.selectedItalic) FontStyle.Italic else FontStyle.Normal,
+                    ),
+                )
+            }
+
+            Spacer(Modifier.width(1.dp).height(20.dp))
+
+            // Colour presets
+            val colours = listOf(
+                0xFF000000.toInt(), // Black
+                0xFFFF0000.toInt(), // Red
+                0xFF0000FF.toInt(), // Blue
+                0xFF008000.toInt(), // Green
+                0xFF800080.toInt(), // Purple
+                0xFFFFA500.toInt(), // Orange
+            )
+            colours.forEach { color ->
+                val selected = state.effectiveColor == color
+                Box(
+                    Modifier
+                        .size(24.dp)
+                        .clip(CircleShape)
+                        .background(Color(color))
+                        .border(
+                            width = if (selected) 2.dp else 0.dp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            shape = CircleShape,
+                        )
+                        .clickable { onFormatChange(state.copy(selectedColor = color)) }
+                        .semantics { contentDescription = "text colour ${if (selected) "selected" else ""}" },
+                )
+            }
         }
 
         // Apply / Cancel buttons

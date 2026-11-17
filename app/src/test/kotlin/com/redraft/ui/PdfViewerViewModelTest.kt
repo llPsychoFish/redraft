@@ -819,6 +819,55 @@ class PdfViewerViewModelTest {
         assertTrue("the command stack is untouched", engine.setTextCalls.isEmpty())
     }
 
+    @Test
+    fun a_line_not_found_is_reported_inside_the_panel() = runTest(dispatcher) {
+        val engine = FakeEditingEngine().apply { lineObjectCount = 0 }
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        vm.onApplyEdit("J")
+        advanceUntilIdle()
+
+        val state = vm.editorState.value
+        assertNotNull("the panel must stay open so the message is visible", state)
+        assertEquals(
+            com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND,
+            state?.applyError,
+        )
+        assertFalse("the spinner must stop", state?.applyInProgress ?: true)
+    }
+
+    @Test
+    fun zoom_to_line_with_no_page_sizes_is_noop() = runTest(dispatcher) {
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+
+        val initialZoom = vm.uiState.value.zoom
+        val initialPanX = vm.uiState.value.panX
+
+        vm.updateSelection(selectionFor("H"))
+        vm.zoomToLine(PdfRect(100f, 700f, 200f, 710f), 1000)
+
+        // With no page sizes configured, zoomToLine is a safe no-op
+        assertEquals(initialZoom, vm.uiState.value.zoom)
+        assertEquals(initialPanX, vm.uiState.value.panX)
+    }
+
     /** Collects the ViewModel's one-shot messages into [into]. */
     private fun CoroutineScope.collectMessages(
         vm: PdfViewerViewModel,
