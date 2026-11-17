@@ -208,3 +208,80 @@ Java_com_redraft_pdfedit_PdfEditingEngine_nativeFindTextObject(
         return -1;
     }
 }
+
+static jstring utf16ToJString(JNIEnv* env, const std::u16string& text) {
+    return env->NewString(reinterpret_cast<const jchar*>(text.data()),
+                          static_cast<jsize>(text.size()));
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_redraft_pdfedit_PdfEditingEngine_nativeLineText(
+    JNIEnv* env, jclass, jlong handle, jint pageIndex,
+    jfloat left, jfloat top, jfloat right, jfloat bottom) {
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return env->NewStringUTF("");
+        const auto pieces = TextMutation::linePieces(document, pageIndex,
+                                                     left, top, right, bottom);
+        return utf16ToJString(env, TextMutation::lineText(pieces));
+    } catch (...) {
+        LOG_W("nativeLineText threw");
+        return env->NewStringUTF("");
+    }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_redraft_pdfedit_PdfEditingEngine_nativeLineObjectCount(
+    JNIEnv*, jclass, jlong handle, jint pageIndex,
+    jfloat left, jfloat top, jfloat right, jfloat bottom) {
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return 0;
+        return static_cast<jint>(TextMutation::linePieces(document, pageIndex,
+                                                          left, top, right, bottom).size());
+    } catch (...) {
+        LOG_W("nativeLineObjectCount threw");
+        return 0;
+    }
+}
+
+extern "C" JNIEXPORT jint JNICALL
+Java_com_redraft_pdfedit_PdfEditingEngine_nativeEditLine(
+    JNIEnv* env, jclass, jlong handle, jint pageIndex,
+    jfloat left, jfloat top, jfloat right, jfloat bottom,
+    jstring expectedText, jstring newText, jlong fontHandle,
+    jfloat fontSizePt, jint color, jfloatArray matrix, jboolean forceReplace) {
+    jfloat* matrixValues = nullptr;
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return TextMutation::LINE_EDIT_NO_OBJECTS;
+
+        const std::u16string expected = jstringToUtf16(env, expectedText);
+        const std::u16string replacement = jstringToUtf16(env, newText);
+        if (matrix) {
+            matrixValues = env->GetFloatArrayElements(matrix, nullptr);
+            if (env->ExceptionCheck()) {
+                env->ExceptionClear();
+                matrixValues = nullptr;
+            }
+        }
+
+        const int result = TextMutation::editLine(
+            document, pageIndex, left, top, right, bottom,
+            expected, replacement,
+            reinterpret_cast<FPDF_FONT>(fontHandle),
+            static_cast<float>(fontSizePt), static_cast<int>(color),
+            matrixValues, forceReplace == JNI_TRUE);
+
+        if (matrixValues) {
+            env->ReleaseFloatArrayElements(matrix, matrixValues, JNI_ABORT);
+        }
+        return result;
+    } catch (...) {
+        if (matrixValues) {
+            env->ReleaseFloatArrayElements(matrix, matrixValues, JNI_ABORT);
+        }
+        LOG_W("nativeEditLine threw");
+        return TextMutation::LINE_EDIT_SET_TEXT_FAILED;
+    }
+}

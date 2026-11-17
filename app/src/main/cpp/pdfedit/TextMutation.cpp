@@ -1,14 +1,19 @@
 #include "TextMutation.h"
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 namespace TextMutation {
 namespace {
 
-// A line's char boxes and its text object's bounds are nearly identical; a
-// match that covers less than half of the selected line is a different object.
-constexpr float kMinOverlapFraction = 0.5f;
+// An object belongs to the line when at least 60% of the OBJECT's own area is
+// inside the line rectangle (a word glyph run, not a whole paragraph).
+constexpr float kMinObjectAreaInsideLine = 0.6f;
+
+// A visual word gap wider than 0.12 em is a space, even when the PDF stores no
+// space character between the pieces.
+constexpr float kWordGapFraction = 0.12f;
 
 std::u16string normalizeWhitespace(const std::u16string& in) {
     std::u16string out;
@@ -70,8 +75,111 @@ float overlapFraction(float objLeft, float objBottom, float objRight, float objT
     return (width * height) / lineArea;
 }
 
+// Fraction of the OBJECT's own area that lies inside the line rectangle.
+float objectAreaInsideLine(float objLeft, float objBottom, float objRight, float objTop,
+                           float lineLeft, float lineBottom, float lineRight, float lineTop) {
+    const float width = std::min(objRight, lineRight) - std::max(objLeft, lineLeft);
+    const float height = std::min(objTop, lineTop) - std::max(objBottom, lineBottom);
+    const float area = (objRight - objLeft) * (objTop - objBottom);
+    if (width <= 0.0f || height <= 0.0f || area <= 0.0f) return 0.0f;
+    return (width * height) / area;
+}
+
 FPDF_WIDESTRING wideString(const std::u16string& text) {
     return reinterpret_cast<FPDF_WIDESTRING>(text.c_str());
+}
+
+// Collect the line's pieces from an already-loaded page and text page.
+std::vector<LinePiece> collectPieces(FPDF_PAGE page, FPDF_TEXTPAGE textPage,
+                                     float left, float bottom, float right, float top) {
+    std::vector<LinePiece> pieces;
+    if (!page || !textPage) return pieces;
+
+    const int count = FPDFPage_CountObjects(page);
+    for (int i = 0; i < count; ++i) {
+        FPDF_PAGEOBJECT object = FPDFPage_GetObject(page, i);
+        if (!object || FPDFPageObj_GetType(object) != FPDF_PAGEOBJ_TEXT) continue;
+
+        float objectLeft = 0.0f;
+        float objectBottom = 0.0f;
+        float objectRight = 0.0f;
+        float objectTop = 0.0f;
+        if (FPDFPageObj_GetBounds(object, &objectLeft, &objectBottom,
+                                  &objectRight, &objectTop) == 0) {
+            continue;
+        }
+        if (objectAreaInsideLine(objectLeft, objectBottom, objectRight, objectTop,
+                                 left, bottom, right, top) < kMinObjectAreaInsideLine) {
+            continue;
+        }
+
+        float fontSize = 0.0f;
+        FPDFTextObj_GetFontSize(object, &fontSize);
+
+        pieces.push_back({i, objectLeft, objectBottom, objectRight, objectTop, fontSize,
+                          textObjectText(object, textPage)});
+    }
+
+    std::stable_sort(pieces.begin(), pieces.end(),
+                     [](const LinePiece& a, const LinePiece& b) { return a.left < b.left; });
+    return pieces;
+}
+
+// Recreate |object| as a new text object with |font| (or its own font when the
+// handle is null). Returns the new object, or null when nothing was changed.
+FPDF_PAGEOBJECT replaceObjectPointer(FPDF_PAGE page, EditingDocument* doc,
+                                     FPDF_PAGEOBJECT object,
+                                     const std::u16string& newText,
+                                     FPDF_FONT font, float fontSizePt,
+                                     int color, const float* matrix) {
+    if (!page || !doc || !doc->docPtr() || !object) return nullptr;
+
+    FPDF_FONT useFont = font ? font : FPDFTextObj_GetFont(object);
+    if (!useFont) return nullptr;
+
+    float size = 0.0f;
+    FPDFTextObj_GetFontSize(object, &size);
+    if (fontSizePt > 0.0f) size = fontSizePt;
+    if (size <= 0.0f) size = 10.0f;
+
+    FPDF_PAGEOBJECT replacement =
+        FPDFPageObj_CreateTextObj(doc->docPtr(), useFont, size);
+    if (!replacement) return nullptr;
+
+    if (FPDFText_SetText(replacement, wideString(newText)) == 0) {
+        FPDFPageObj_Destroy(replacement);
+        return nullptr;
+    }
+
+    // Preserve the original fill colour when PDFium can report it; fall back to
+    // the ARGB value the UI read from the extracted fragment.
+    unsigned int r = (color >> 16) & 0xFF;
+    unsigned int g = (color >> 8) & 0xFF;
+    unsigned int b = color & 0xFF;
+    unsigned int a = (color >> 24) & 0xFF;
+    FPDFPageObj_GetFillColor(object, &r, &g, &b, &a);
+    FPDFPageObj_SetFillColor(replacement, r, g, b, a);
+
+    // The old object's matrix carries its exact position, rotation and scale.
+    FS_MATRIX oldMatrix = {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+    if (FPDFPageObj_GetMatrix(object, &oldMatrix)) {
+        FPDFPageObj_SetMatrix(replacement, &oldMatrix);
+    } else if (matrix) {
+        FS_MATRIX fallback = {matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]};
+        FPDFPageObj_SetMatrix(replacement, &fallback);
+    }
+
+    // Insert the replacement BEFORE removing the original. InsertObject returns
+    // void and takes ownership on success; RemoveObject reports success.
+    FPDFPage_InsertObject(page, replacement);
+    if (FPDFPage_RemoveObject(page, object) == 0) {
+        if (FPDFPage_RemoveObject(page, replacement)) {
+            FPDFPageObj_Destroy(replacement);
+        }
+        return nullptr;
+    }
+    FPDFPageObj_Destroy(object);
+    return replacement;
 }
 
 } // namespace
@@ -110,65 +218,11 @@ bool replaceTextObject(EditingDocument* doc, int pageIndex, int objectIndex,
         return false;
     }
 
-    // Reuse the original font when the caller has no fallback: the font handle
-    // is owned by this document and stays valid until it is closed.
-    FPDF_FONT useFont = font ? font : FPDFTextObj_GetFont(oldObject);
-    if (!useFont) {
-        doc->closePage(page);
-        return false;
-    }
-
-    float size = 0.0f;
-    FPDFTextObj_GetFontSize(oldObject, &size);
-    if (fontSizePt > 0.0f) size = fontSizePt;
-    if (size <= 0.0f) size = 10.0f;
-
-    FPDF_PAGEOBJECT newObject = FPDFPageObj_CreateTextObj(doc->docPtr(), useFont, size);
-    if (!newObject) {
-        doc->closePage(page);
-        return false;
-    }
-
-    if (FPDFText_SetText(newObject, wideString(newText)) == 0) {
-        FPDFPageObj_Destroy(newObject);
-        doc->closePage(page);
-        return false;
-    }
-
-    // Preserve the original fill colour when PDFium can report it; fall back to
-    // the ARGB value the UI read from the extracted fragment.
-    unsigned int r = (color >> 16) & 0xFF;
-    unsigned int g = (color >> 8) & 0xFF;
-    unsigned int b = color & 0xFF;
-    unsigned int a = (color >> 24) & 0xFF;
-    FPDFPageObj_GetFillColor(oldObject, &r, &g, &b, &a);
-    FPDFPageObj_SetFillColor(newObject, r, g, b, a);
-
-    // The old object's matrix carries its exact position, rotation and scale.
-    FS_MATRIX oldMatrix = {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
-    if (FPDFPageObj_GetMatrix(oldObject, &oldMatrix)) {
-        FPDFPageObj_SetMatrix(newObject, &oldMatrix);
-    } else if (matrix) {
-        FS_MATRIX fallback = {matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]};
-        FPDFPageObj_SetMatrix(newObject, &fallback);
-    }
-
-    // Insert the replacement BEFORE removing the original. InsertObject returns
-    // void and takes ownership on success; RemoveObject reports success.
-    FPDFPage_InsertObject(page, newObject);
-    if (FPDFPage_RemoveObject(page, oldObject) == 0) {
-        // Undo the insertion so the page keeps exactly one copy of the line.
-        if (FPDFPage_RemoveObject(page, newObject)) {
-            FPDFPageObj_Destroy(newObject);
-        }
-        doc->closePage(page);
-        return false;
-    }
-    FPDFPageObj_Destroy(oldObject);
-
-    const bool ok = FPDFPage_GenerateContent(page) != 0;
+    const bool ok = replaceObjectPointer(page, doc, oldObject, newText, font,
+                                         fontSizePt, color, matrix) != nullptr;
+    const bool generated = ok && FPDFPage_GenerateContent(page) != 0;
     doc->closePage(page);
-    return ok;
+    return generated;
 }
 
 int getTextObjectCount(EditingDocument* doc, int pageIndex) {
@@ -229,7 +283,7 @@ int findTextObject(EditingDocument* doc, int pageIndex,
             continue;
         }
         if (overlapFraction(objectLeft, objectBottom, objectRight, objectTop,
-                            left, bottom, right, top) < kMinOverlapFraction) {
+                            left, bottom, right, top) < 0.5f) {
             continue;
         }
         if (compactForMatch(textObjectText(object, textPage)) != wanted) continue;
@@ -241,6 +295,123 @@ int findTextObject(EditingDocument* doc, int pageIndex,
     FPDFText_ClosePage(textPage);
     doc->closePage(page);
     return matches == 1 ? found : -1;
+}
+
+std::vector<LinePiece> linePieces(EditingDocument* doc, int pageIndex,
+                                  float left, float bottom, float right, float top) {
+    if (!doc) return {};
+    FPDF_PAGE page = doc->loadPage(pageIndex);
+    if (!page) return {};
+
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    if (!textPage) {
+        doc->closePage(page);
+        return {};
+    }
+
+    std::vector<LinePiece> pieces =
+        collectPieces(page, textPage, left, bottom, right, top);
+    FPDFText_ClosePage(textPage);
+    doc->closePage(page);
+    return pieces;
+}
+
+std::u16string lineText(const std::vector<LinePiece>& pieces) {
+    std::u16string out;
+    const LinePiece* previous = nullptr;
+    for (const LinePiece& piece : pieces) {
+        if (previous != nullptr) {
+            const bool previousEndsSpace =
+                !previous->text.empty() && (previous->text.back() == u' ' || previous->text.back() == u'\t');
+            const bool nextStartsSpace =
+                !piece.text.empty() && (piece.text.front() == u' ' || piece.text.front() == u'\t');
+            const float size = std::max(previous->fontSize, piece.fontSize);
+            const float gap = piece.left - previous->right;
+            if (!previousEndsSpace && !nextStartsSpace && size > 0.0f &&
+                gap > kWordGapFraction * size) {
+                out.push_back(u' ');
+            }
+        }
+        out += piece.text;
+        previous = &piece;
+    }
+    return normalizeWhitespace(out);
+}
+
+int editLine(EditingDocument* doc, int pageIndex,
+             float left, float bottom, float right, float top,
+             const std::u16string& expectedLineText,
+             const std::u16string& newText,
+             FPDF_FONT font, float fontSizePt,
+             int color, const float* matrix, bool forceReplace) {
+    if (!doc || !doc->docPtr()) return LINE_EDIT_NO_OBJECTS;
+    FPDF_PAGE page = doc->loadPage(pageIndex);
+    if (!page) return LINE_EDIT_NO_OBJECTS;
+
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    if (!textPage) {
+        doc->closePage(page);
+        return LINE_EDIT_NO_OBJECTS;
+    }
+
+    std::vector<LinePiece> pieces =
+        collectPieces(page, textPage, left, bottom, right, top);
+
+    std::u16string joined;
+    for (const LinePiece& piece : pieces) joined += piece.text;
+
+    const bool piecesAddUp =
+        !pieces.empty() &&
+        compactForMatch(joined) == compactForMatch(expectedLineText);
+
+    // Hold the pointers before any mutation: removing objects shifts indices.
+    std::vector<FPDF_PAGEOBJECT> others;
+    FPDF_PAGEOBJECT first = nullptr;
+    if (piecesAddUp) {
+        first = FPDFPage_GetObject(page, pieces[0].index);
+        for (size_t i = 1; i < pieces.size(); ++i) {
+            FPDF_PAGEOBJECT other = FPDFPage_GetObject(page, pieces[i].index);
+            if (other && other != first) others.push_back(other);
+        }
+    }
+
+    FPDFText_ClosePage(textPage);
+
+    if (!piecesAddUp) {
+        const int result = pieces.empty() ? LINE_EDIT_NO_OBJECTS : LINE_EDIT_TEXT_MISMATCH;
+        doc->closePage(page);
+        return result;
+    }
+    if (!first) {
+        doc->closePage(page);
+        return LINE_EDIT_NO_OBJECTS;
+    }
+
+    // Replace the first piece's text; fall back to a new object (bundled font)
+    // when the original font cannot encode the new text.
+    bool mutated = false;
+    if (!forceReplace) {
+        mutated = FPDFText_SetText(first, wideString(newText)) != 0;
+    }
+    if (!mutated) {
+        mutated = replaceObjectPointer(page, doc, first, newText, font, fontSizePt,
+                                       color, matrix) != nullptr;
+    }
+    if (!mutated) {
+        doc->closePage(page);
+        return LINE_EDIT_SET_TEXT_FAILED;
+    }
+
+    // Remove the rest of the line, each object exactly once.
+    for (FPDF_PAGEOBJECT other : others) {
+        if (other && FPDFPage_RemoveObject(page, other)) {
+            FPDFPageObj_Destroy(other);
+        }
+    }
+
+    const bool generated = FPDFPage_GenerateContent(page) != 0;
+    doc->closePage(page);
+    return generated ? LINE_EDIT_OK : LINE_EDIT_GENERATE_FAILED;
 }
 
 } // namespace TextMutation

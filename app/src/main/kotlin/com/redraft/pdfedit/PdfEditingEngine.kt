@@ -6,6 +6,26 @@ import android.os.ParcelFileDescriptor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
+/** Result of [PdfEditingEngine.editLine]; mirrors TextMutation::LineEditResult. */
+enum class LineEditOutcome {
+    OK,
+    NO_OBJECTS,
+    TEXT_MISMATCH,
+    SET_TEXT_FAILED,
+    GENERATE_FAILED,
+    ;
+
+    companion object {
+        fun fromCode(code: Int): LineEditOutcome = when (code) {
+            0 -> OK
+            2 -> TEXT_MISMATCH
+            3 -> SET_TEXT_FAILED
+            4 -> GENERATE_FAILED
+            else -> NO_OBJECTS
+        }
+    }
+}
+
 interface PdfEditingEngine {
     suspend fun open(uri: Uri, pfd: ParcelFileDescriptor): Result<EditingHandle>
     suspend fun close(handle: EditingHandle)
@@ -42,6 +62,47 @@ interface PdfEditingEngine {
         bottom: Float,
         text: String,
     ): Int
+
+    /** The line's text built from the real text objects, with spaces inferred from the gaps. */
+    suspend fun lineText(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ): String
+
+    /** How many text objects the line is made of (used for logging and diagnostics). */
+    suspend fun lineObjectCount(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ): Int
+
+    /**
+     * Edits the whole visual line, merging every text object on it into one.
+     * Refuses (without changing the page) when the pieces do not add up to
+     * [expectedText] once whitespace is ignored.
+     */
+    suspend fun editLine(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        expectedText: String,
+        newText: String,
+        fontHandle: FontHandle,
+        fontSizePt: Float,
+        color: Int,
+        matrix: FloatArray,
+        forceReplace: Boolean = false,
+    ): LineEditOutcome
 }
 
 class PdfEditingEngineImpl private constructor(private val context: Context) : PdfEditingEngine {
@@ -75,6 +136,17 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
         right: Float,
         bottom: Float,
         text: String,
+    ): Int
+    private external fun nativeLineText(
+        handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
+    ): String
+    private external fun nativeLineObjectCount(
+        handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
+    ): Int
+    private external fun nativeEditLine(
+        handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
+        expectedText: String, newText: String, fontHandle: Long, fontSizePt: Float,
+        color: Int, matrix: FloatArray, forceReplace: Boolean,
     ): Int
 
     override suspend fun open(uri: Uri, pfd: ParcelFileDescriptor): Result<EditingHandle> = withContext(Dispatchers.IO) {
@@ -147,5 +219,50 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
         text: String,
     ): Int = withContext(Dispatchers.IO) {
         nativeFindTextObject(handle.ptr, pageIndex, left, top, right, bottom, text)
+    }
+
+    override suspend fun lineText(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ): String = withContext(Dispatchers.IO) {
+        nativeLineText(handle.ptr, pageIndex, left, top, right, bottom)
+    }
+
+    override suspend fun lineObjectCount(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ): Int = withContext(Dispatchers.IO) {
+        nativeLineObjectCount(handle.ptr, pageIndex, left, top, right, bottom)
+    }
+
+    override suspend fun editLine(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        expectedText: String,
+        newText: String,
+        fontHandle: FontHandle,
+        fontSizePt: Float,
+        color: Int,
+        matrix: FloatArray,
+        forceReplace: Boolean,
+    ): LineEditOutcome = withContext(Dispatchers.IO) {
+        LineEditOutcome.fromCode(
+            nativeEditLine(
+                handle.ptr, pageIndex, left, top, right, bottom,
+                expectedText, newText, fontHandle.ptr, fontSizePt, color, matrix, forceReplace,
+            ),
+        )
     }
 }
