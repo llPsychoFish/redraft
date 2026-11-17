@@ -45,6 +45,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -117,7 +118,12 @@ class PdfViewerViewModelTest {
 
     private class FakeEditingEngine : PdfEditingEngine {
         val setTextCalls = mutableListOf<Triple<Int, Int, String>>()
+        val editLineCalls = mutableListOf<Triple<Int, String, String>>()
         var findTextObjectResult = 0
+        var lineObjectCount = 1
+        var lineText = ""
+        var editLineOutcome = com.redraft.pdfedit.LineEditOutcome.OK
+        var saveAsCopyResult = true
 
         override suspend fun open(uri: android.net.Uri, pfd: android.os.ParcelFileDescriptor): Result<EditingHandle> =
             Result.success(EditingHandle(0))
@@ -128,7 +134,13 @@ class PdfViewerViewModelTest {
         }
         override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray): Boolean = true
         override suspend fun findTextObject(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float, text: String): Int = findTextObjectResult
-        override suspend fun saveAsCopy(handle: EditingHandle, destPath: String): Boolean = true
+        override suspend fun lineText(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): String = lineText
+        override suspend fun lineObjectCount(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): Int = lineObjectCount
+        override suspend fun editLine(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float, expectedText: String, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray, forceReplace: Boolean): com.redraft.pdfedit.LineEditOutcome {
+            editLineCalls += Triple(pageIndex, expectedText, newText)
+            return editLineOutcome
+        }
+        override suspend fun saveAsCopy(handle: EditingHandle, destPath: String): Boolean = saveAsCopyResult
         override suspend fun loadBundledFont(handle: EditingHandle, fontName: String, bold: Boolean, italic: Boolean): FontHandle = FontHandle(0)
         override suspend fun getTextObjectCount(handle: EditingHandle, pageIndex: Int): Int = 0
         override suspend fun getTextObjectCharCount(handle: EditingHandle, pageIndex: Int, objectIndex: Int): Int = 0
@@ -709,8 +721,102 @@ class PdfViewerViewModelTest {
         vm.onApplyEdit("J")
         advanceUntilIdle()
 
-        assertEquals(1, engine.setTextCalls.size)
-        assertEquals("J", engine.setTextCalls.single().third)
+        assertEquals(1, engine.editLineCalls.size)
+        assertEquals("H", engine.editLineCalls.single().second)
+        assertEquals("J", engine.editLineCalls.single().third)
+    }
+
+    @Test
+    fun editor_text_comes_from_the_line_objects_not_the_character_boxes() = runTest(dispatcher) {
+        val engine = FakeEditingEngine().apply {
+            lineText = "KOFORIDUA TECHNICAL UNIVERSITY"
+            lineObjectCount = 3
+        }
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        assertEquals(
+            "the editor must show the text objects' text with both spaces",
+            "KOFORIDUA TECHNICAL UNIVERSITY",
+            vm.editorState.value?.originalText,
+        )
+        assertEquals(3, vm.editorState.value?.lineObjectCount)
+    }
+
+    @Test
+    fun a_piece_mismatch_is_reported_inside_the_panel() = runTest(dispatcher) {
+        val received = mutableListOf<ViewerMessage>()
+        val engine = FakeEditingEngine().apply {
+            editLineOutcome = com.redraft.pdfedit.LineEditOutcome.TEXT_MISMATCH
+        }
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+        )
+        backgroundScope.collectMessages(vm, received)
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        vm.onApplyEdit("J")
+        advanceUntilIdle()
+
+        val state = vm.editorState.value
+        assertNotNull("the panel must stay open so the message is visible", state)
+        assertEquals(
+            com.redraft.ui.viewer.EditorEditFailure.PIECES_DO_NOT_ADD_UP,
+            state?.applyError,
+        )
+        assertFalse("the spinner must stop", state?.applyInProgress ?: true)
+        assertFalse(
+            "Apply problems must not go to the bottom snackbar",
+            ViewerMessage.EditTargetAmbiguous in received,
+        )
+    }
+
+    @Test
+    fun a_save_failure_is_reported_inside_the_panel() = runTest(dispatcher) {
+        val engine = FakeEditingEngine().apply { saveAsCopyResult = false }
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        vm.onApplyEdit("J")
+        advanceUntilIdle()
+
+        assertNotNull(
+            "the failure must be shown in the panel",
+            vm.editorState.value?.applyError,
+        )
+        assertFalse("the panel must stay open", vm.editorState.value?.applyInProgress ?: true)
+        assertTrue("the command stack is untouched", engine.setTextCalls.isEmpty())
     }
 
     /** Collects the ViewModel's one-shot messages into [into]. */

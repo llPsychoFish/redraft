@@ -839,17 +839,39 @@ class PdfViewerViewModel(
             }
             return
         }
-        openEditorForSelection()
+        viewModelScope.launch { openEditorForSelection() }
     }
 
     /** Builds the editor state from the current selection (its layout must be cached). */
-    private fun openEditorForSelection() {
+    private suspend fun openEditorForSelection() {
         val selection = _selectionState.value ?: return
         val line = selection.selectedLine ?: return
         val fragment = line.fragment
 
         // Full font fallback analysis (D-304)
-        val originalText = editableLineText(line)
+        // The text objects are the source of truth. PDFium may store no space
+        // character between words, and the character boxes then have to guess.
+        val boxText = editableLineText(line)
+        val handle = editingHandle
+        val engine = editingEngine
+        var objects = 0
+        val originalText = if (handle != null && engine != null) {
+            objects = runCatching {
+                engine.lineObjectCount(
+                    handle, selection.pageIndex,
+                    line.rect.minX, line.rect.minY, line.rect.maxX, line.rect.maxY,
+                )
+            }.getOrDefault(0)
+            runCatching {
+                engine.lineText(
+                    handle, selection.pageIndex,
+                    line.rect.minX, line.rect.minY, line.rect.maxX, line.rect.maxY,
+                )
+            }.getOrDefault("").ifBlank { boxText }
+        } else {
+            boxText
+        }
+        Log.d(TAG_EDIT, "editor text='$originalText' objects=$objects boxes='$boxText'")
         val fontName = fragment.style.fontName ?: ""
         val fontAnalysis = fontAnalysisOf(fontName)
         
@@ -876,6 +898,7 @@ class PdfViewerViewModel(
             draftText = originalText,
             fontSizePt = fragment.style.fontSizePt,
             textColor = fragment.style.fillColor ?: 0xFF000000.toInt(),
+            lineObjectCount = objects,
             fontChangeNotice = fontChangeNotice,
             lengthWarning = false,
             canApply = canApply,
@@ -886,98 +909,122 @@ class PdfViewerViewModel(
     /** Commits the edit: creates EditCommand, executes via JNI, pushes to stack. */
     fun onApplyEdit(newText: String) {
         val editor = _editorState.value ?: return
+        if (editor.applyInProgress) return
         val selection = _selectionState.value
         if (selection == null) {
-            Log.d(TAG_EDIT, "onApplyEdit: no line selected")
-            _messages.tryEmit(ViewerMessage.NothingSelected)
+            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_SELECTION)
             return
         }
         val handle = editingHandle
         val engine = editingEngine
         if (handle == null || engine == null) {
             notifyEditingUnavailable("apply")
+            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_ENGINE)
             return
         }
         val line = selection.selectedLine
         if (line == null) {
-            Log.d(TAG_EDIT, "onApplyEdit: selection has no line")
-            _messages.tryEmit(ViewerMessage.NothingSelected)
+            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_SELECTION)
             return
         }
         val fragment = line.fragment
+        val rect = line.rect
 
-        // Determine font for this edit
+        // Determine the font for this edit.
         val fontName = fragment.style.fontName ?: ""
         val fontAnalysis = fontAnalysisOf(fontName)
         val fallbackDecision = analyzeFontForEdit(fontName, newText, editor.originalText)
+        if (fallbackDecision == FontFallbackDecision.UNSUPPORTED_CHARS) {
+            failEdit(com.redraft.ui.viewer.EditorEditFailure.UNSUPPORTED_CHARACTER)
+            return
+        }
         val newFontName = when (fallbackDecision) {
             FontFallbackDecision.USE_BUNDLED_FALLBACK -> selectBundledFont(fontAnalysis)
             else -> fontName
         }
-        
+
+        // Every outcome is shown inside the panel; the editor never fails silently.
+        _editorState.value = editor.copy(applyInProgress = true, applyError = null)
+
         viewModelScope.launch {
-            // Find the ONE page object whose bounds and text match this line. A miss is
-            // reported, never guessed: editing the wrong object corrupts the page.
-            val objectIndex = engine.findTextObject(
-                handle = handle,
-                pageIndex = selection.pageIndex,
-                left = line.rect.minX,
-                top = line.rect.minY,
-                right = line.rect.maxX,
-                bottom = line.rect.maxY,
-                text = editor.originalText,
-            )
-            if (objectIndex < 0) {
-                Log.d(TAG_EDIT, "onApplyEdit: no single text object matches the line")
-                _messages.tryEmit(ViewerMessage.EditTargetAmbiguous)
-                return@launch
-            }
-            
-            // Load bundled font if needed
-            var fontHandle: FontHandle? = null
-            if (fallbackDecision == FontFallbackDecision.USE_BUNDLED_FALLBACK) {
-                fontHandle = fontCache.getOrPut(newFontName) {
-                    engine.loadBundledFont(handle, newFontName, fontAnalysis.bold, fontAnalysis.italic)
-                }
-            }
-
-            val cmd = EditCommand(
-                documentId = currentUri ?: "",
-                pageIndex = selection.pageIndex,
-                lineId = selection.blockId ?: "p${selection.pageIndex}:b${line.chars.firstOrNull()?.index ?: 0}",
-                objectIndex = objectIndex,
-                oldText = editor.originalText,
-                newText = newText,
-                oldFontName = fontName,
-                newFontName = newFontName,
-                fontSizePt = editor.fontSizePt,
-                color = editor.textColor,
-                baselineRect = line.rect,
-                matrix = floatArrayOf(1f, 0f, 0f, 1f, line.rect.minX, line.rect.minY),
-            )
-
-            // Execute mutation (Path A or B) with failure handling
             try {
-                val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
-                if (!success) {
-                    // Path B: the embedded font cannot encode the new text. A zero
-                    // font handle tells the native layer to reuse the object's own
-                    // font; a bundled fallback is used when the analysis chose one.
-                    val replaced = engine.replaceTextObject(
-                        handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                        fontHandle ?: FontHandle(0), cmd.fontSizePt, cmd.color, cmd.matrix,
-                    )
-                    if (!replaced) throw IllegalStateException("Text replacement failed")
+                val fontHandle = if (fallbackDecision == FontFallbackDecision.USE_BUNDLED_FALLBACK) {
+                    fontCache.getOrPut(newFontName) {
+                        engine.loadBundledFont(handle, newFontName, fontAnalysis.bold, fontAnalysis.italic)
+                    }
+                } else {
+                    FontHandle(0)
                 }
 
-                // Save copy → reopen rendering doc → invalidate cache
+                val count = engine.lineObjectCount(
+                    handle, selection.pageIndex, rect.minX, rect.minY, rect.maxX, rect.maxY,
+                )
+                Log.d(
+                    TAG_EDIT,
+                    "apply: objects=$count line='${editor.originalText}' new='$newText' font='$newFontName'",
+                )
+                if (count == 0) {
+                    failEdit(com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND)
+                    return@launch
+                }
+
+                val cmd = EditCommand(
+                    documentId = currentUri ?: "",
+                    pageIndex = selection.pageIndex,
+                    lineId = selection.blockId ?: "p${selection.pageIndex}:b${line.chars.firstOrNull()?.index ?: 0}",
+                    objectIndex = -1, // the line is edited as a whole, not by one object
+                    oldText = editor.originalText,
+                    newText = newText,
+                    oldFontName = fontName,
+                    newFontName = newFontName,
+                    fontSizePt = editor.fontSizePt,
+                    color = editor.textColor,
+                    baselineRect = rect,
+                    matrix = floatArrayOf(1f, 0f, 0f, 1f, rect.minX, rect.minY),
+                )
+
+                val outcome = engine.editLine(
+                    handle = handle,
+                    pageIndex = selection.pageIndex,
+                    left = rect.minX,
+                    top = rect.minY,
+                    right = rect.maxX,
+                    bottom = rect.maxY,
+                    expectedText = editor.originalText,
+                    newText = newText,
+                    fontHandle = fontHandle,
+                    fontSizePt = editor.fontSizePt,
+                    color = editor.textColor,
+                    matrix = cmd.matrix,
+                )
+                Log.d(TAG_EDIT, "apply: editLine -> $outcome")
+                when (outcome) {
+                    com.redraft.pdfedit.LineEditOutcome.OK -> Unit
+                    com.redraft.pdfedit.LineEditOutcome.NO_OBJECTS -> {
+                        failEdit(com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND)
+                        return@launch
+                    }
+                    com.redraft.pdfedit.LineEditOutcome.TEXT_MISMATCH -> {
+                        failEdit(com.redraft.ui.viewer.EditorEditFailure.PIECES_DO_NOT_ADD_UP)
+                        return@launch
+                    }
+                    com.redraft.pdfedit.LineEditOutcome.SET_TEXT_FAILED -> {
+                        failEdit(com.redraft.ui.viewer.EditorEditFailure.FONT_FAILED)
+                        return@launch
+                    }
+                    com.redraft.pdfedit.LineEditOutcome.GENERATE_FAILED -> {
+                        failEdit(com.redraft.ui.viewer.EditorEditFailure.GENERIC)
+                        return@launch
+                    }
+                }
+
                 val tempFile = createTempEditFile()
-                val saveSuccess = engine.saveAsCopy(handle, tempFile.absolutePath)
-                if (!saveSuccess) throw IllegalStateException("SaveAsCopy returned false")
-                
+                if (!engine.saveAsCopy(handle, tempFile.absolutePath)) {
+                    failEdit(com.redraft.ui.viewer.EditorEditFailure.SAVE_FAILED)
+                    return@launch
+                }
                 reopenRenderingDocument(tempFile)
 
-                // Push to command stack ONLY on success
                 _past.add(cmd)
                 _pastFlow.value = _past.toList()
                 _future.clear()
@@ -985,13 +1032,17 @@ class PdfViewerViewModel(
                 _editorState.value = null
                 triggerReRender(selection.pageIndex)
             } catch (e: Throwable) {
-                // FAILURE HANDLING (D-305): Keep old document, show snackbar, keep editor open with draft
-                // Do NOT push command to stacks (edit stays as unsaved draft)
-                _messages.tryEmit(ViewerMessage.EditFailed)
-                // Editor panel remains open with draft text (no _editorState.value = null)
-                // Command stacks unchanged
+                Log.w(TAG_EDIT, "apply failed", e)
+                failEdit(com.redraft.ui.viewer.EditorEditFailure.GENERIC)
             }
         }
+    }
+
+    /** Shows an Apply failure inside the panel and keeps the draft. */
+    private fun failEdit(reason: com.redraft.ui.viewer.EditorEditFailure) {
+        val state = _editorState.value ?: return
+        _editorState.value = state.copy(applyInProgress = false, applyError = reason)
+        Log.d(TAG_EDIT, "apply failed: $reason")
     }
 
     fun onUndo() { popAndExecute(_past, _future, inverse = true) }
@@ -1023,41 +1074,40 @@ class PdfViewerViewModel(
     }
 
     private suspend fun executeCommand(cmd: EditCommand) {
-        val handle = editingHandle ?: return
-        val engine = editingEngine ?: return
-        
-        try {
-            val success = engine.setText(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText)
-            if (!success) {
-                // For undo/redo, we need to load the font if it's a bundled font
-                val fontHandle = if (cmd.newFontName != cmd.oldFontName && cmd.newFontName.startsWith("Liberation")) {
-                    fontCache.getOrPut(cmd.newFontName) {
-                        // We need to determine bold/italic from the font name
-                        val bold = cmd.newFontName.contains("Bold")
-                        val italic = cmd.newFontName.contains("Italic")
-                        engine.loadBundledFont(handle, cmd.newFontName, bold, italic)
-                    }
-                } else {
-                    FontHandle(0)
-                }
-                if (!engine.replaceTextObject(handle, cmd.pageIndex, cmd.objectIndex, cmd.newText,
-                        fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix)) {
-                    throw IllegalStateException("Text replacement failed")
-                }
+        // Undo/redo uses the same whole-line path, so it also works for lines
+        // that were stored as several text objects.
+        val handle = editingHandle ?: throw IllegalStateException("no editing handle")
+        val engine = editingEngine ?: throw IllegalStateException("no editing engine")
+        val rect = cmd.baselineRect
+        val fontHandle = if (cmd.newFontName.startsWith("Liberation")) {
+            fontCache.getOrPut(cmd.newFontName) {
+                engine.loadBundledFont(
+                    handle,
+                    cmd.newFontName,
+                    cmd.newFontName.contains("Bold"),
+                    cmd.newFontName.contains("Italic"),
+                )
             }
-
-            val tempFile = createTempEditFile()
-            val saveSuccess = engine.saveAsCopy(handle, tempFile.absolutePath)
-            if (!saveSuccess) throw IllegalStateException("SaveAsCopy returned false")
-            reopenRenderingDocument(tempFile)
-            triggerReRender(cmd.pageIndex)
-        } catch (e: Throwable) {
-            // FAILURE HANDLING for undo/redo: Revert stacks, show error, keep old document
-            // Push the command back to source stack
-            _messages.tryEmit(ViewerMessage.EditFailed)
-            // The stacks were already modified in popAndExecute - we need to revert
-            // This is handled by the caller catching the exception, but we emit the message here
+        } else {
+            FontHandle(0)
         }
+
+        val outcome = engine.editLine(
+            handle, cmd.pageIndex,
+            rect.minX, rect.minY, rect.maxX, rect.maxY,
+            cmd.oldText, cmd.newText, fontHandle, cmd.fontSizePt, cmd.color, cmd.matrix,
+        )
+        Log.d(TAG_EDIT, "undo/redo: editLine -> $outcome")
+        if (outcome != com.redraft.pdfedit.LineEditOutcome.OK) {
+            throw IllegalStateException("line edit failed: $outcome")
+        }
+
+        val tempFile = createTempEditFile()
+        if (!engine.saveAsCopy(handle, tempFile.absolutePath)) {
+            throw IllegalStateException("SaveAsCopy returned false")
+        }
+        reopenRenderingDocument(tempFile)
+        triggerReRender(cmd.pageIndex)
     }
 
     private fun createTempEditFile(): java.io.File {

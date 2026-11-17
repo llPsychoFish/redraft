@@ -131,6 +131,7 @@ fun EditorPanel(
                 .semantics { contentDescription = editingDesc }
                 .focusRequester(focusRequester),
             singleLine = true,
+            enabled = !state.applyInProgress,
             keyboardOptions = KeyboardOptions(
                 imeAction = ImeAction.Done,
                 capitalization = KeyboardCapitalization.Sentences,
@@ -144,6 +145,17 @@ fun EditorPanel(
             interactionSource = remember { MutableInteractionSource() },
         )
 
+        // Every failure is reported here, inside the panel, not in a snackbar
+        // that can sit behind the keyboard.
+        state.applyError?.let { error ->
+            Text(
+                text = error.message(),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            )
+        }
+
         // Apply / Cancel buttons
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
@@ -155,14 +167,36 @@ fun EditorPanel(
             Spacer(Modifier.width(8.dp))
             Button(
                 onClick = onApply,
-                enabled = state.canApply,
+                enabled = state.canApply && !state.applyInProgress,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary,
                     contentColor = MaterialTheme.colorScheme.onPrimary,
                 ),
             ) {
-                Text(stringResource(R.string.apply))
+                if (state.applyInProgress) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                    )
+                } else {
+                    Text(stringResource(R.string.apply))
+                }
             }
         }
     }
 }
+
+@Composable
+private fun EditorEditFailure.message(): String = stringResource(
+    when (this) {
+        EditorEditFailure.NO_ENGINE -> R.string.edit_error_no_engine
+        EditorEditFailure.NO_SELECTION -> R.string.edit_error_no_selection
+        EditorEditFailure.TARGET_NOT_FOUND -> R.string.edit_error_target_not_found
+        EditorEditFailure.PIECES_DO_NOT_ADD_UP -> R.string.edit_error_pieces
+        EditorEditFailure.FONT_FAILED -> R.string.edit_error_font
+        EditorEditFailure.SAVE_FAILED -> R.string.edit_error_save
+        EditorEditFailure.UNSUPPORTED_CHARACTER -> R.string.edit_error_unsupported
+        EditorEditFailure.GENERIC -> R.string.edit_error_generic
+    },
+)
