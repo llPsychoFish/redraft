@@ -139,6 +139,57 @@ class RealTextEditTest {
         }
     }
 
+    @Test
+    fun edit_a_heading_stored_as_one_object_per_word() = runBlocking {
+        val originalBytes = testAssets.open("multi_word_line.pdf").use { it.readBytes() }
+        val source = File(targetContext.cacheDir, "multi-source.pdf").apply { writeBytes(originalBytes) }
+        val copy = File(targetContext.cacheDir, "multi-copy.pdf").apply { delete() }
+
+        val document = PdfDocumentHandle.open(originalBytes)
+        val line = try {
+            val layout = document.pageTextLayout(0, document.pageSize(0)) as PageTextLayout.Ready
+            layout.layout.reducedLines.first { reduced -> reduced.chars.any { !it.text.isBlank() } }
+        } finally {
+            document.close()
+        }
+
+        PdfEditModule.initialize(targetContext)
+        val engine = PdfEditModule.engine()
+        val handle = ParcelFileDescriptor.open(source, ParcelFileDescriptor.MODE_READ_ONLY).use { pfd ->
+            engine.open(Uri.fromFile(source), pfd).getOrThrow()
+        }
+
+        try {
+            val rect = line.rect
+            val objects = engine.lineObjectCount(handle, 0, rect.minX, rect.minY, rect.maxX, rect.maxY)
+            assertEquals("the fixture must store the heading as several objects", 3, objects)
+            val startText = engine.lineText(handle, 0, rect.minX, rect.minY, rect.maxX, rect.maxY)
+            assertEquals("KOFORIDUA TECHNICAL UNIVERSITY", startText)
+
+            val outcome = engine.editLine(
+                handle, 0, rect.minX, rect.minY, rect.maxX, rect.maxY,
+                startText, "Arnold Sampson",
+                FontHandle(0), line.fragment.style.fontSizePt, 0xFF000000.toInt(),
+                floatArrayOf(1f, 0f, 0f, 1f, rect.minX, rect.minY),
+            )
+            assertEquals(LineEditOutcome.OK, outcome)
+            assertTrue("saving the merged line must succeed", engine.saveAsCopy(handle, copy.absolutePath))
+        } finally {
+            engine.close(handle)
+        }
+
+        val reopened = PdfDocumentHandle.open(copy.readBytes())
+        try {
+            val layout = reopened.pageTextLayout(0, reopened.pageSize(0)) as PageTextLayout.Ready
+            val text = layout.layout.chars.joinToString("") { it.text }
+            assertTrue("the merged line must contain the new text", text.contains("Arnold Sampson"))
+            assertFalse("the old heading must be gone", text.contains("KOFORIDUA"))
+            assertTrue("the next line must be unchanged", text.contains("Ghana Water Limited"))
+        } finally {
+            reopened.close()
+        }
+    }
+
     private suspend fun readFirstLine(
         bytes: ByteArray,
     ): Pair<com.redraft.pdfcore.selection.TextLine, String> {
