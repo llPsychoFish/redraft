@@ -316,6 +316,7 @@ private fun EditorEditFailure.message(): String = stringResource(
         EditorEditFailure.PIECES_DO_NOT_ADD_UP -> R.string.edit_error_pieces
         EditorEditFailure.FONT_FAILED -> R.string.edit_error_font
         EditorEditFailure.SAVE_FAILED -> R.string.edit_error_save
+        EditorEditFailure.RERENDER_FAILED -> R.string.edit_error_rerender
         EditorEditFailure.UNSUPPORTED_CHARACTER -> R.string.edit_error_unsupported
         EditorEditFailure.GENERIC -> R.string.edit_error_generic
     },

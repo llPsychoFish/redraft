@@ -38,6 +38,10 @@ bool setText(EditingDocument* doc, int pageIndex, int objectIndex,
 // Path B: replace the object with a new text object that uses |font| (or the
 // old object's own font when |font| is null), preserving its matrix, size and
 // fill colour. Returns false on any failure; on failure the page is unchanged.
+//
+// Overrides are opt-in: |fontSizePt| <= 0 keeps the original object's size,
+// |color| with alpha 0 keeps the original fill colour, and |matrix| == null
+// keeps the original object matrix (its exact origin, rotation and scale).
 bool replaceTextObject(EditingDocument* doc, int pageIndex, int objectIndex,
                        const std::u16string& newText,
                        FPDF_FONT font, float fontSizePt,
@@ -65,11 +69,20 @@ std::vector<LinePiece> linePieces(EditingDocument* doc, int pageIndex,
 // where the visual gap is wider than 0.12 em. This is the editor's start text.
 std::u16string lineText(const std::vector<LinePiece>& pieces);
 
+// The font size PDFium reports for the line's first text object
+// (FPDFTextObj_GetFontSize), or 0 when the line has no text object. This is the
+// size the editor shows and the size a replacement reuses; the character boxes
+// carry a different, unreliable number.
+float lineFontSize(EditingDocument* doc, int pageIndex,
+                   float left, float bottom, float right, float top);
+
 // Edit the whole line. The concatenated piece texts must equal
 // |expectedLineText| with all whitespace removed; otherwise nothing is changed.
 // The leftmost piece receives the whole new text; the other pieces are removed.
 // When |forceReplace| is true (a formatting change) the first piece is always
 // recreated with |font|/|fontSizePt|/|color| instead of reusing its own font.
+// Overrides are opt-in, as in replaceTextObject: <= 0 size, alpha-0 colour and a
+// null matrix all mean "keep what the original object has".
 int editLine(EditingDocument* doc, int pageIndex,
              float left, float bottom, float right, float top,
              const std::u16string& expectedLineText,

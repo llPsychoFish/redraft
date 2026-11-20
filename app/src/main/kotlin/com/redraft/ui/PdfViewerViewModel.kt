@@ -16,6 +16,7 @@ import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.pdfcore.selection.groupBlocks
 import kotlin.coroutines.coroutineContext
+import kotlin.math.roundToInt
 import com.redraft.pdfcore.selection.hitTest
 import com.redraft.pdfcore.selection.pageTextLayout
 import com.redraft.data.DocumentHandle
@@ -30,6 +31,9 @@ import com.redraft.pdfedit.FontHandle
 import com.redraft.pdfedit.PdfEditModule
 import com.redraft.ui.viewer.EditorPanelState
 import com.redraft.ui.viewer.PageBitmapCache
+import com.redraft.ui.viewer.PageKey
+import com.redraft.ui.viewer.renderedZoomForBucket
+import com.redraft.ui.viewer.scaleBucketForZoom
 import com.redraft.ui.overview.ThumbnailCache
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -81,16 +85,27 @@ data class EditCommand(
     val newText: String,
     val oldFontName: String,
     val newFontName: String,
+    /** Size override for this edit; `0` keeps the original object's size. */
     val fontSizePt: Float,
-    val color: Int,                   // ARGB
+    /** ARGB colour override; alpha `0` keeps the original object's colour. */
+    val color: Int,
     val baselineRect: PdfRect,        // PDF coords for reselection
-    val matrix: FloatArray,           // CTM for Path B
+    /** Matrix override; `null` keeps the original object's matrix (its origin). */
+    val matrix: FloatArray?,
+    /** The line's original size, restored by undo. */
+    val originalFontSizePt: Float = 0f,
+    /** The line's original ARGB colour, restored by undo. */
+    val originalColor: Int = 0,
 ) {
     fun inverse(): EditCommand = copy(
         oldText = newText,
         newText = oldText,
         oldFontName = newFontName,
         newFontName = oldFontName,
+        // Undo restores the look the line had before the edit.
+        fontSizePt = originalFontSizePt,
+        color = originalColor,
+        matrix = null,
     )
 }
 
@@ -322,6 +337,22 @@ enum class ViewerMessage {
 /** How long a tap waits for an in-flight extraction before it is dropped (D-29). */
 const val EXTRACTION_WAIT_MS = 1_000L
 
+/**
+ * How long Apply waits for the edited page to be re-rendered from the saved
+ * copy before it gives up and shows an error inside the panel. The panel must
+ * not close on a page that still shows the old pixels.
+ */
+const val RERENDER_TIMEOUT_MS = 3_000L
+
+/**
+ * Renders the edited page after the saved copy is reopened. Injectable so the
+ * "editor stays open until the new pixels exist" contract is unit-testable
+ * without PDFium. Returns true only when a real bitmap came back.
+ */
+fun interface EditedPageRenderer {
+    suspend fun render(pageIndex: Int, widthPx: Int, heightPx: Int): Boolean
+}
+
 /** Roughly how many extracted page layouts are kept (D-28). */
 const val MAX_CACHED_TEXT_LAYOUTS = 4
 
@@ -356,6 +387,16 @@ class PdfViewerViewModel(
     private val contentResolverProvider: (() -> android.content.ContentResolver)? = null,
     /** Application context used for the edit cache and reopening the saved copy. Null in tests. */
     private val appContext: Context? = null,
+    /**
+     * How Apply re-renders the edited page. Null uses the live document handle
+     * and [pageBitmapCache]; tests inject a fake so the wait is deterministic.
+     */
+    private val editedPageRenderer: EditedPageRenderer? = null,
+    /**
+     * Creates the temp file the edited copy is saved to. Null uses the app
+     * cache directory; unit tests inject one because they have no Context.
+     */
+    private val editTempFileFactory: (() -> java.io.File)? = null,
     // Cache ownership (A-1) — single instance per ViewModel
     val pageBitmapCache: PageBitmapCache = PageBitmapCache(),
     val thumbnailCache: ThumbnailCache = ThumbnailCache(),
@@ -937,12 +978,30 @@ class PdfViewerViewModel(
             TAG_EDIT,
             "editor text='$originalText' native='$nativeText' boxes='$boxText' objects=$objects",
         )
+        // The size PDFium reports for the real text object. The character boxes
+        // carry a different number (a 12 pt heading showed as 25 pt), and the
+        // replacement object reuses the native size, so the editor must show it.
+        val nativeFontSizePt = if (handle != null && engine != null) {
+            runCatching {
+                engine.lineFontSize(
+                    handle, selection.pageIndex,
+                    line.rect.minX, line.rect.minY, line.rect.maxX, line.rect.maxY,
+                )
+            }.getOrDefault(0f)
+        } else {
+            0f
+        }
+        val editorFontSizePt =
+            if (nativeFontSizePt > 0f) nativeFontSizePt else fragment.style.fontSizePt
+        Log.d(
+            TAG_EDIT,
+            "editor size native=${nativeFontSizePt}pt boxes=${fragment.style.fontSizePt}pt used=${editorFontSizePt}pt",
+        )
         val fontName = fragment.style.fontName ?: ""
         val fontAnalysis = fontAnalysisOf(fontName)
         
         // Initial analysis with original text (no new chars yet)
         val fallbackDecision = analyzeFontForEdit(fontName, originalText, originalText)
-        
         val fontChangeNotice = when (fallbackDecision) {
             FontFallbackDecision.USE_BUNDLED_FALLBACK ->
                 bundledFontDisplayName(selectBundledFont(fontAnalysis))
@@ -961,7 +1020,7 @@ class PdfViewerViewModel(
         _editorState.value = EditorPanelState(
             originalText = originalText,
             draftText = originalText,
-            fontSizePt = fragment.style.fontSizePt,
+            fontSizePt = editorFontSizePt,
             textColor = fragment.style.fillColor ?: 0xFF000000.toInt(),
             lineObjectCount = objects,
             fontChangeNotice = fontChangeNotice,
@@ -1009,11 +1068,16 @@ class PdfViewerViewModel(
         }
 
         // Formatting changes (size/bold/italic/colour) force a replacement object.
+        val sizeChanged = editor.effectiveFontSizePt != editor.fontSizePt
+        val colorChanged = editor.effectiveColor != editor.textColor
         val formattingChanged =
-            editor.effectiveFontSizePt != editor.fontSizePt ||
-                editor.selectedBold ||
-                editor.selectedItalic ||
-                editor.effectiveColor != editor.textColor
+            sizeChanged || editor.selectedBold || editor.selectedItalic || colorChanged
+
+        // Overrides are opt-in: 0 size and alpha-0 colour mean "keep what the
+        // original text object has". Nothing here moves the object, so the
+        // matrix is always null (the native code reuses the original origin).
+        val sizeOverride = if (sizeChanged) editor.effectiveFontSizePt else 0f
+        val colorOverride = if (colorChanged) editor.effectiveColor else 0
 
         // Every outcome is shown inside the panel; the editor never fails silently.
         _editorState.value = editor.copy(applyInProgress = true, applyError = null)
@@ -1048,6 +1112,13 @@ class PdfViewerViewModel(
                     TAG_EDIT,
                     "apply: objects=$count line='${editor.originalText}' new='$newText' font='$newFontName'",
                 )
+                Log.d(
+                    TAG_EDIT,
+                    "apply: path=${if (formattingChanged) "replacement" else "in-place"} " +
+                        "size=${if (sizeOverride > 0f) "${sizeOverride}pt (user)" else "original"} " +
+                        "colour=${if (colorOverride != 0) "0x${Integer.toHexString(colorOverride)} (user)" else "original"} " +
+                        "matrix=original",
+                )
                 if (count == 0) {
                     failEdit(com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND)
                     return@launch
@@ -1062,10 +1133,12 @@ class PdfViewerViewModel(
                     newText = newText,
                     oldFontName = fontName,
                     newFontName = newFontName,
-                    fontSizePt = editor.effectiveFontSizePt,
-                    color = editor.effectiveColor,
+                    fontSizePt = sizeOverride,
+                    color = colorOverride,
                     baselineRect = rect,
-                    matrix = floatArrayOf(1f, 0f, 0f, 1f, rect.minX, rect.minY),
+                    matrix = null,
+                    originalFontSizePt = editor.fontSizePt,
+                    originalColor = editor.textColor,
                 )
 
                 val outcome = engine.editLine(
@@ -1078,8 +1151,8 @@ class PdfViewerViewModel(
                     expectedText = editor.originalText,
                     newText = newText,
                     fontHandle = fontHandle,
-                    fontSizePt = editor.effectiveFontSizePt,
-                    color = editor.effectiveColor,
+                    fontSizePt = sizeOverride,
+                    color = colorOverride,
                     matrix = cmd.matrix,
                     forceReplace = formattingChanged,
                 )
@@ -1109,7 +1182,43 @@ class PdfViewerViewModel(
                     failEdit(com.redraft.ui.viewer.EditorEditFailure.SAVE_FAILED)
                     return@launch
                 }
-                reopenRenderingDocument(tempFile)
+                Log.d(TAG_EDIT, "apply: saved ${tempFile.length()}B to ${tempFile.name}")
+
+                val pageIndex = selection.pageIndex
+                // The size of the bitmap that was on screen, read BEFORE the
+                // cache is invalidated, so the verification render matches it.
+                val bucket = scaleBucketForZoom(_uiState.value.zoom)
+                val dimensions = renderedDimensionsFor(pageIndex, bucket)
+
+                val reopenError = try {
+                    reopenRenderingDocument(tempFile)
+                    null
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Throwable) {
+                    e
+                }
+                Log.d(
+                    TAG_EDIT,
+                    "apply: reopen -> ${if (reopenError == null) "ok pages=${_uiState.value.pageCount}" else "failed: ${reopenError.message}"}",
+                )
+                if (reopenError != null) {
+                    failEdit(com.redraft.ui.viewer.EditorEditFailure.SAVE_FAILED)
+                    return@launch
+                }
+
+                triggerReRender(pageIndex)
+
+                // Keep the Apply spinner until the page shows the new pixels.
+                // Closing earlier is what made a correct edit look like it had
+                // vanished: the panel disappeared while the old bitmap was
+                // still on screen.
+                val reRendered = awaitReRenderedPage(pageIndex, bucket, dimensions)
+                Log.d(TAG_EDIT, "apply: re-render -> $reRendered")
+                if (!reRendered) {
+                    failEdit(com.redraft.ui.viewer.EditorEditFailure.RERENDER_FAILED)
+                    return@launch
+                }
 
                 _past.add(cmd)
                 _pastFlow.value = _past.toList()
@@ -1117,7 +1226,6 @@ class PdfViewerViewModel(
                 _futureFlow.value = emptyList()
                 endEditSession()
                 _editorState.value = null
-                triggerReRender(selection.pageIndex)
             } catch (e: Throwable) {
                 Log.w(TAG_EDIT, "apply failed", e)
                 failEdit(com.redraft.ui.viewer.EditorEditFailure.GENERIC)
@@ -1206,6 +1314,12 @@ class PdfViewerViewModel(
     }
 
     private fun createTempEditFile(): java.io.File {
+        val injected = editTempFileFactory
+        if (injected != null) {
+            val file = injected()
+            currentEditTempFile = file
+            return file
+        }
         val cacheDir = appContext?.cacheDir
             ?: throw IllegalStateException("No application context for the edit cache")
         val file = java.io.File.createTempFile("edit_", ".pdf", cacheDir)
@@ -1216,9 +1330,12 @@ class PdfViewerViewModel(
     private suspend fun reopenRenderingDocument(tempFile: java.io.File) {
         val handle = currentHandle ?: return
         val uri = currentUri ?: return
-        
+
         // SAFE REOPEN (D-305): Open and verify new document BEFORE closing old
-        val context = appContext ?: throw IllegalStateException("No application context for reopen")
+        // Without an application context there is no SAF opener: this is the
+        // unit-test configuration, where the rendering swap is exercised by the
+        // injected page renderer instead.
+        val context = appContext ?: return
         val newHandleResult = withContext(ioDispatcher) {
             SafDocumentOpener.open(context, android.net.Uri.fromFile(tempFile))
         }
@@ -1279,6 +1396,51 @@ class PdfViewerViewModel(
         // The cross-fade will be triggered when PageBitmapCache detects invalidated page
         // Reselection will be triggered via LaunchedEffect in PdfViewerScreen observing textLayoutCache
     }
+
+    /**
+     * The pixel size the edited page was last drawn at, so the verification
+     * render replaces it with a bitmap of the same size. Falls back to 2 px per
+     * PDF point when nothing is cached (the page was never on screen).
+     */
+    private fun renderedDimensionsFor(pageIndex: Int, bucket: Int): Pair<Int, Int> {
+        val cached = pageBitmapCache.acquire(PageKey(pageIndex, bucket))
+            ?: pageBitmapCache.acquireAny(pageIndex)
+        if (cached != null && cached.width > 0 && cached.height > 0) {
+            return cached.width to cached.height
+        }
+        val geometry = _uiState.value.pageSizes.firstOrNull { it.pageIndex == pageIndex }
+        val zoom = renderedZoomForBucket(bucket)
+        val quarterTurn = geometry?.rotationDegrees == 90 || geometry?.rotationDegrees == 270
+        val widthPt = if (quarterTurn) geometry?.heightPt ?: 792f else geometry?.widthPt ?: 612f
+        val heightPt = if (quarterTurn) geometry?.widthPt ?: 612f else geometry?.heightPt ?: 792f
+        return ((widthPt * zoom * 2f).roundToInt().coerceAtLeast(1)) to
+            ((heightPt * zoom * 2f).roundToInt().coerceAtLeast(1))
+    }
+
+    /**
+     * Renders [pageIndex] from the reopened document and waits at most
+     * [RERENDER_TIMEOUT_MS] for the bitmap. The result goes into the shared
+     * cache, so the page item paints the new pixels on its next composition.
+     */
+    private suspend fun awaitReRenderedPage(
+        pageIndex: Int,
+        bucket: Int,
+        dimensions: Pair<Int, Int>,
+    ): Boolean = withTimeoutOrNull(RERENDER_TIMEOUT_MS) {
+        val injected = editedPageRenderer
+        if (injected != null) {
+            return@withTimeoutOrNull injected.render(pageIndex, dimensions.first, dimensions.second)
+        }
+        val handle = _handle.value ?: return@withTimeoutOrNull false
+        val bitmap = runCatching {
+            withContext(ioDispatcher) {
+                handle.renderPage(pageIndex, dimensions.first, dimensions.second)
+            }
+        }.getOrNull() ?: return@withTimeoutOrNull false
+        if (bitmap.width <= 0 || bitmap.height <= 0) return@withTimeoutOrNull false
+        pageBitmapCache.put(PageKey(pageIndex, bucket), bitmap)
+        true
+    } ?: false
 
     private val openMutex = Mutex()
     private var currentHandle: DocumentHandle? = null

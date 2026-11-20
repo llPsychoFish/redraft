@@ -37,9 +37,12 @@ interface PdfEditingEngine {
         objectIndex: Int,
         newText: String,
         fontHandle: FontHandle,
+        /** Point size override; `0` keeps the original object's size. */
         fontSizePt: Float,
+        /** ARGB override; alpha `0` keeps the original object's fill colour. */
         color: Int,
-        matrix: FloatArray
+        /** Matrix override; `null` keeps the original object's matrix (its origin). */
+        matrix: FloatArray?,
     ): Boolean
     suspend fun saveAsCopy(handle: EditingHandle, destPath: String): Boolean
     suspend fun loadBundledFont(handle: EditingHandle, fontName: String, bold: Boolean, italic: Boolean): FontHandle
@@ -84,6 +87,23 @@ interface PdfEditingEngine {
     ): Int
 
     /**
+     * The font size PDFium reports for the line's first text object
+     * (`FPDFTextObj_GetFontSize`), or `0` when the line has no text object.
+     *
+     * This is the size the editor shows and a replacement reuses. The
+     * character boxes carry a different number that is unreliable on some
+     * documents (a 12 pt heading showed as 25 pt).
+     */
+    suspend fun lineFontSize(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ): Float
+
+    /**
      * Edits the whole visual line, merging every text object on it into one.
      * Refuses (without changing the page) when the pieces do not add up to
      * [expectedText] once whitespace is ignored.
@@ -98,9 +118,12 @@ interface PdfEditingEngine {
         expectedText: String,
         newText: String,
         fontHandle: FontHandle,
+        /** Point size override; `0` keeps the original object's size. */
         fontSizePt: Float,
+        /** ARGB override; alpha `0` keeps the original object's fill colour. */
         color: Int,
-        matrix: FloatArray,
+        /** Matrix override; `null` keeps the original object's matrix (its origin). */
+        matrix: FloatArray?,
         forceReplace: Boolean = false,
     ): LineEditOutcome
 }
@@ -123,7 +146,7 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
     private external fun nativeClose(handle: Long)
     private external fun nativeSetText(handle: Long, pageIndex: Int, objectIndex: Int, newText: String): Boolean
     private external fun nativeReplaceTextObject(handle: Long, pageIndex: Int, objectIndex: Int,
-        newText: String, fontHandle: Long, fontSizePt: Float, color: Int, matrix: FloatArray): Boolean
+        newText: String, fontHandle: Long, fontSizePt: Float, color: Int, matrix: FloatArray?): Boolean
     private external fun nativeSaveAsCopy(handle: Long, destPath: String): Boolean
     private external fun nativeLoadBundledFont(handle: Long, fontName: String, bold: Boolean, italic: Boolean, fontData: ByteArray): Long
     private external fun nativeGetTextObjectCount(handle: Long, pageIndex: Int): Int
@@ -143,10 +166,13 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
     private external fun nativeLineObjectCount(
         handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
     ): Int
+    private external fun nativeLineFontSize(
+        handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
+    ): Float
     private external fun nativeEditLine(
         handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
         expectedText: String, newText: String, fontHandle: Long, fontSizePt: Float,
-        color: Int, matrix: FloatArray, forceReplace: Boolean,
+        color: Int, matrix: FloatArray?, forceReplace: Boolean,
     ): Int
 
     override suspend fun open(uri: Uri, pfd: ParcelFileDescriptor): Result<EditingHandle> = withContext(Dispatchers.IO) {
@@ -177,7 +203,7 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
         }
 
     override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int,
-        newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: FloatArray): Boolean =
+        newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: FloatArray?): Boolean =
         withContext(Dispatchers.IO) {
             nativeReplaceTextObject(handle.ptr, pageIndex, objectIndex, newText, fontHandle.ptr, fontSizePt, color, matrix)
         }
@@ -239,6 +265,17 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
         nativeLineObjectCount(handle.ptr, pageIndex, left, top, right, bottom)
     }
 
+    override suspend fun lineFontSize(
+        handle: EditingHandle,
+        pageIndex: Int,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+    ): Float = withContext(Dispatchers.IO) {
+        nativeLineFontSize(handle.ptr, pageIndex, left, top, right, bottom)
+    }
+
     override suspend fun editLine(
         handle: EditingHandle,
         pageIndex: Int,
@@ -251,7 +288,7 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
         fontHandle: FontHandle,
         fontSizePt: Float,
         color: Int,
-        matrix: FloatArray,
+        matrix: FloatArray?,
         forceReplace: Boolean,
     ): LineEditOutcome = withContext(Dispatchers.IO) {
         LineEditOutcome.fromCode(

@@ -151,22 +151,38 @@ FPDF_PAGEOBJECT replaceObjectPointer(FPDF_PAGE page, EditingDocument* doc,
         return nullptr;
     }
 
-    // Preserve the original fill colour when PDFium can report it; fall back to
-    // the ARGB value the UI read from the extracted fragment.
-    unsigned int r = (color >> 16) & 0xFF;
-    unsigned int g = (color >> 8) & 0xFF;
-    unsigned int b = color & 0xFF;
-    unsigned int a = (color >> 24) & 0xFF;
-    FPDFPageObj_GetFillColor(object, &r, &g, &b, &a);
-    FPDFPageObj_SetFillColor(replacement, r, g, b, a);
+    // Colour: an explicit override (alpha != 0) wins; otherwise reuse the
+    // original object's fill colour, which is what the page actually shows.
+    const unsigned int overrideAlpha = (static_cast<unsigned int>(color) >> 24) & 0xFF;
+    if (overrideAlpha != 0) {
+        FPDFPageObj_SetFillColor(replacement,
+                                 (static_cast<unsigned int>(color) >> 16) & 0xFF,
+                                 (static_cast<unsigned int>(color) >> 8) & 0xFF,
+                                 static_cast<unsigned int>(color) & 0xFF,
+                                 overrideAlpha);
+    } else {
+        unsigned int r = 0;
+        unsigned int g = 0;
+        unsigned int b = 0;
+        unsigned int a = 255;
+        if (FPDFPageObj_GetFillColor(object, &r, &g, &b, &a)) {
+            FPDFPageObj_SetFillColor(replacement, r, g, b, a);
+        }
+    }
 
-    // The old object's matrix carries its exact position, rotation and scale.
-    FS_MATRIX oldMatrix = {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
-    if (FPDFPageObj_GetMatrix(object, &oldMatrix)) {
-        FPDFPageObj_SetMatrix(replacement, &oldMatrix);
-    } else if (matrix) {
-        FS_MATRIX fallback = {matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5]};
-        FPDFPageObj_SetMatrix(replacement, &fallback);
+    // Position: an explicit matrix wins; otherwise the old object's matrix
+    // carries its exact origin, rotation and scale. Using the line rectangle's
+    // bottom edge instead put the new text on the wrong baseline.
+    if (matrix) {
+        FS_MATRIX overrideMatrix = {
+            matrix[0], matrix[1], matrix[2], matrix[3], matrix[4], matrix[5],
+        };
+        FPDFPageObj_SetMatrix(replacement, &overrideMatrix);
+    } else {
+        FS_MATRIX oldMatrix = {1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f};
+        if (FPDFPageObj_GetMatrix(object, &oldMatrix)) {
+            FPDFPageObj_SetMatrix(replacement, &oldMatrix);
+        }
     }
 
     // Insert the replacement BEFORE removing the original. InsertObject returns
@@ -336,6 +352,29 @@ std::u16string lineText(const std::vector<LinePiece>& pieces) {
         previous = &piece;
     }
     return normalizeWhitespace(out);
+}
+
+float lineFontSize(EditingDocument* doc, int pageIndex,
+                   float left, float bottom, float right, float top) {
+    if (!doc) return 0.0f;
+    FPDF_PAGE page = doc->loadPage(pageIndex);
+    if (!page) return 0.0f;
+
+    FPDF_TEXTPAGE textPage = FPDFText_LoadPage(page);
+    if (!textPage) {
+        doc->closePage(page);
+        return 0.0f;
+    }
+
+    const std::vector<LinePiece> pieces =
+        collectPieces(page, textPage, left, bottom, right, top);
+    FPDFText_ClosePage(textPage);
+    doc->closePage(page);
+
+    for (const LinePiece& piece : pieces) {
+        if (piece.fontSize > 0.0f) return piece.fontSize;
+    }
+    return 0.0f;
 }
 
 int editLine(EditingDocument* doc, int pageIndex,

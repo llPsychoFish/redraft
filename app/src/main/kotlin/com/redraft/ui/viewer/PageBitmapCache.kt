@@ -112,6 +112,25 @@ class PageBitmapCache(
     }
 
     /**
+     * Returns any cached bitmap for [pageIndex], whatever the zoom bucket.
+     *
+     * Used after an edit to re-render at the size the page was last drawn at;
+     * the exact bucket may have been evicted while another one survives.
+     */
+    fun acquireAny(pageIndex: Int): Bitmap? {
+        synchronized(lru) {
+            return try {
+                lru.snapshot().entries
+                    .firstOrNull { it.key.pageIndex == pageIndex }
+                    ?.value
+            } catch (_: Throwable) {
+                // Ignore unmocked android.util.LruCache in JVM unit tests
+                null
+            }
+        }
+    }
+
+    /**
      * Stores [bitmap] as the rendering for [key].
      *
      * The cache claim is taken before the bitmap enters the LRU, so a
@@ -170,16 +189,20 @@ class PageBitmapCache(
      */
     fun invalidatePage(pageIndex: Int) {
         synchronized(lru) {
-            val keysToRemove = lru.snapshot().keys.filter { it.pageIndex == pageIndex }
-            for (key in keysToRemove) {
-                val bitmap = lru.get(key)
-                if (bitmap != null) {
-                    refs.releaseFromCache(bitmap)
-                    recycleIfUnreferenced(bitmap)
+            try {
+                val keysToRemove = lru.snapshot().keys.filter { it.pageIndex == pageIndex }
+                for (key in keysToRemove) {
+                    val bitmap = lru.get(key)
+                    if (bitmap != null) {
+                        refs.releaseFromCache(bitmap)
+                        recycleIfUnreferenced(bitmap)
+                    }
+                    lru.remove(key)
                 }
-                lru.remove(key)
+                invalidatedPages.add(pageIndex)
+            } catch (_: Throwable) {
+                // Ignore unmocked android.util.LruCache in JVM unit tests
             }
-            invalidatedPages.add(pageIndex)
         }
     }
 

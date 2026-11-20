@@ -22,6 +22,11 @@ Needs `g++` and the DejaVu fonts (`/usr/share/fonts/truetype/dejavu/`). A system
   re-reads it and asserts the new text is present, the old heading is gone, and the next
   line is unchanged. It also asserts the editor's start text is
   `KOFORIDUA TECHNICAL UNIVERSITY` and that a mismatched line is refused.
+- `replacement_edit_test.cpp` forces the replacement path with the bundled Liberation Sans
+  TTF and no style overrides. It asserts the new object reuses the original font size,
+  starts within 1 pt of the original left edge, and (when the replacement text is the same
+  heading) keeps its height within 20%. This is the check for the "25 pt heading that came
+  out twice as tall" defect.
 - `edit_one_object_test.cpp` exercises the older single-object `findTextObject` path.
 
 ## Limitation

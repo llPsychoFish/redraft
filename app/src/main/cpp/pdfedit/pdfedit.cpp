@@ -258,6 +258,21 @@ Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeLineObjectCount(
     }
 }
 
+extern "C" JNIEXPORT jfloat JNICALL
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeLineFontSize(
+    JNIEnv*, jclass, jlong handle, jint pageIndex,
+    jfloat left, jfloat top, jfloat right, jfloat bottom) {
+    try {
+        auto* document = reinterpret_cast<EditingHandle>(handle);
+        if (!document) return 0.0f;
+        return static_cast<jfloat>(TextMutation::lineFontSize(document, pageIndex,
+                                                              left, top, right, bottom));
+    } catch (...) {
+        LOG_W("nativeLineFontSize threw");
+        return 0.0f;
+    }
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeEditLine(
     JNIEnv* env, jclass, jlong handle, jint pageIndex,

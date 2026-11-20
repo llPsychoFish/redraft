@@ -20,8 +20,19 @@ g++ -std=c++17 -O1 -I"$HDR" -I"$SRC" "$HERE/edit_multi_object_prototype.cpp" \
 g++ -std=c++17 -O1 -I"$HDR" -I"$SRC" "$HERE/line_edit_test.cpp" \
     "$SRC/EditingDocument.cpp" "$SRC/TextMutation.cpp" "$SRC/Save.cpp" \
     -L"$LIB" -l:libpdfium.so -Wl,-rpath,"$LIB" -o line_edit_test
+g++ -std=c++17 -O1 -I"$HDR" -I"$SRC" "$HERE/replacement_edit_test.cpp" \
+    "$SRC/EditingDocument.cpp" "$SRC/TextMutation.cpp" "$SRC/Save.cpp" \
+    -L"$LIB" -l:libpdfium.so -Wl,-rpath,"$LIB" -o replacement_edit_test
 
 # The two cases from the review: a one-object line and a one-object-per-word line.
 ./line_edit_test A_single.pdf A_edited.pdf "Arnold Sampson"
 ./line_edit_test B_perword.pdf B_edited.pdf "Arnold Sampson"
+
+# The replacement path with a bundled font: same origin, same height, same size.
+FONT="$ROOT/app/src/main/assets/fonts/liberation/LiberationSans-Regular.ttf"
+# Same text: the ink box is comparable, so the height check is meaningful.
+./replacement_edit_test A_single.pdf A_replaced.pdf "$FONT" "KOFORIDUA TECHNICAL UNIVERSITY"
+./replacement_edit_test B_perword.pdf B_replaced.pdf "$FONT" "KOFORIDUA TECHNICAL UNIVERSITY"
+# Different text: the new object still starts on the original left edge.
+./replacement_edit_test A_single.pdf A_replaced_new.pdf "$FONT" "Arnold Sampson"
 echo "ALL HOST TESTS PASSED"

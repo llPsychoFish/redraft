@@ -138,6 +138,7 @@
     <string name="edit_error_pieces">This line is made of separate pieces that could not be matched. Nothing was changed.</string>
     <string name="edit_error_font">The new text could not be written with the available fonts. Nothing was changed.</string>
     <string name="edit_error_save">The edited page could not be saved. Nothing was changed.</string>
+    <string name="edit_error_rerender">The edited page could not be shown. Nothing was changed.</string>
     <string name="edit_error_unsupported">The new text contains characters this font cannot show.</string>
     <string name="edit_error_generic">The edit failed. Nothing was changed.</string>
     <string name="apply">Apply</string>

@@ -119,9 +119,14 @@ class PdfViewerViewModelTest {
     private class FakeEditingEngine : PdfEditingEngine {
         val setTextCalls = mutableListOf<Triple<Int, Int, String>>()
         val editLineCalls = mutableListOf<Triple<Int, String, String>>()
+        /** The override values passed to the last [editLine], for the style contract. */
+        var lastFontSizePt: Float = Float.NaN
+        var lastColor: Int = Int.MIN_VALUE
+        var lastMatrix: FloatArray? = null
         var findTextObjectResult = 0
         var lineObjectCount = 1
         var lineText = ""
+        var lineFontSize = 0f
         var editLineOutcome = com.redraft.pdfedit.LineEditOutcome.OK
         var saveAsCopyResult = true
 
@@ -132,12 +137,16 @@ class PdfViewerViewModelTest {
             setTextCalls += Triple(pageIndex, objectIndex, newText)
             return true
         }
-        override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray): Boolean = true
+        override suspend fun replaceTextObject(handle: EditingHandle, pageIndex: Int, objectIndex: Int, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: FloatArray?): Boolean = true
         override suspend fun findTextObject(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float, text: String): Int = findTextObjectResult
         override suspend fun lineText(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): String = lineText
         override suspend fun lineObjectCount(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): Int = lineObjectCount
-        override suspend fun editLine(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float, expectedText: String, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: kotlin.FloatArray, forceReplace: Boolean): com.redraft.pdfedit.LineEditOutcome {
+        override suspend fun lineFontSize(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): Float = lineFontSize
+        override suspend fun editLine(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float, expectedText: String, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: FloatArray?, forceReplace: Boolean): com.redraft.pdfedit.LineEditOutcome {
             editLineCalls += Triple(pageIndex, expectedText, newText)
+            lastFontSizePt = fontSizePt
+            lastColor = color
+            lastMatrix = matrix
             return editLineOutcome
         }
         override suspend fun saveAsCopy(handle: EditingHandle, destPath: String): Boolean = saveAsCopyResult
@@ -151,6 +160,7 @@ class PdfViewerViewModelTest {
         log: MutableList<String> = mutableListOf(),
         extractor: suspend (DocumentHandle, Int) -> PageTextLayout = { _, _ -> PageTextLayout.Empty },
         engine: FakeEditingEngine = FakeEditingEngine(),
+        renderer: EditedPageRenderer = EditedPageRenderer { _, _, _ -> true },
         opener: (String) -> Result<DocumentHandle>,
     ): PdfViewerViewModel = PdfViewerViewModel(
         recentsRepository = recents,
@@ -163,6 +173,8 @@ class PdfViewerViewModelTest {
         extractPageText = extractor,
         editingEngineFactory = { engine },
         contentResolverProvider = null,
+        editedPageRenderer = renderer,
+        editTempFileFactory = { java.io.File.createTempFile("edit_test_", ".pdf").apply { deleteOnExit() } },
     )
 
     @Test
@@ -866,6 +878,146 @@ class PdfViewerViewModelTest {
         // With no page sizes configured, zoomToLine is a safe no-op
         assertEquals(initialZoom, vm.uiState.value.zoom)
         assertEquals(initialPanX, vm.uiState.value.panX)
+    }
+
+    @Test
+    fun the_editor_stays_open_until_the_edited_page_is_re_rendered() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Boolean>()
+        var renderedPage = -1
+        val engine = FakeEditingEngine()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+            renderer = EditedPageRenderer { pageIndex, _, _ ->
+                renderedPage = pageIndex
+                gate.await()
+            },
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        vm.onApplyEdit("J")
+        runCurrent()
+
+        assertEquals("the edited page is the one re-rendered", 0, renderedPage)
+        assertNotNull(
+            "the editor must not close before the new pixels exist",
+            vm.editorState.value,
+        )
+        assertTrue(
+            "the Apply spinner must keep running",
+            vm.editorState.value?.applyInProgress ?: false,
+        )
+        assertTrue(
+            "no command may be committed before the page is visible",
+            vm.pastCommands.value.isEmpty(),
+        )
+
+        gate.complete(true)
+        advanceUntilIdle()
+
+        assertNull("the editor closes once the re-render lands", vm.editorState.value)
+        assertEquals(1, vm.pastCommands.value.size)
+    }
+
+    @Test
+    fun a_failed_re_render_keeps_the_editor_open_with_an_error() = runTest(dispatcher) {
+        val engine = FakeEditingEngine()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+            renderer = EditedPageRenderer { _, _, _ -> false },
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        vm.onApplyEdit("J")
+        advanceUntilIdle()
+
+        val state = vm.editorState.value
+        assertNotNull("the panel must stay open so the error is visible", state)
+        assertEquals(
+            com.redraft.ui.viewer.EditorEditFailure.RERENDER_FAILED,
+            state?.applyError,
+        )
+        assertFalse("the spinner must stop", state?.applyInProgress ?: true)
+        assertTrue("no command may be recorded", vm.pastCommands.value.isEmpty())
+    }
+
+    @Test
+    fun apply_without_formatting_changes_keeps_the_original_object_style() = runTest(dispatcher) {
+        val engine = FakeEditingEngine()
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        vm.onApplyEdit("J")
+        advanceUntilIdle()
+
+        assertEquals(
+            "a 0 size override tells native to reuse the object's own size",
+            0f,
+            engine.lastFontSizePt,
+            0.001f,
+        )
+        assertEquals(
+            "an alpha-0 colour override tells native to reuse the object's colour",
+            0,
+            engine.lastColor,
+        )
+        assertNull(
+            "a null matrix tells native to reuse the object's own origin",
+            engine.lastMatrix,
+        )
+    }
+
+    @Test
+    fun the_editor_shows_the_size_pdfium_reports_for_the_text_object() = runTest(dispatcher) {
+        val engine = FakeEditingEngine().apply { lineFontSize = 11.5f }
+        val vm = viewModel(
+            recents = FakeRecents(),
+            opener = { Result.success(FakeHandle(1, "doc", mutableListOf())) },
+            extractor = { _, _ -> PageTextLayout.Ready(textLayout()) },
+            engine = engine,
+        )
+        vm.open("uri")
+        advanceUntilIdle()
+        vm.setEditMode(true)
+        vm.updateSelection(selectionFor("H"))
+        vm.attachEditingSessionForTest(engine, EditingHandle(1))
+        vm.onEditText()
+        advanceUntilIdle()
+
+        assertEquals(
+            "the editor must show the native size, not the character-box estimate",
+            11.5f,
+            vm.editorState.value?.fontSizePt ?: 0f,
+            0.001f,
+        )
     }
 
     /** Collects the ViewModel's one-shot messages into [into]. */

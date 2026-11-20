@@ -8,6 +8,8 @@ enum class EditorEditFailure {
     PIECES_DO_NOT_ADD_UP,
     FONT_FAILED,
     SAVE_FAILED,
+    /** The saved copy could not be re-rendered in time; the panel stays open. */
+    RERENDER_FAILED,
     UNSUPPORTED_CHARACTER,
     GENERIC,
 }
