@@ -1,6 +1,8 @@
 package com.redraft.ui.nav
 
+import android.content.Context
 import android.net.Uri
+import com.redraft.BuildConfig
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
@@ -17,14 +19,19 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.redraft.R
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.about.AboutScreen
 import com.redraft.ui.home.HomeScreen
 import com.redraft.ui.overview.PageOverviewRoute
+import com.redraft.ui.settings.EditingSelfTestScreen
+import com.redraft.ui.settings.EditingSelfTestViewModel
 import com.redraft.ui.settings.SettingsScreen
 import com.redraft.ui.settings.SettingsViewModel
 import com.redraft.ui.support.SupportScreen
@@ -38,6 +45,7 @@ const val ROUTE_OVERVIEW = "overview"
 const val ROUTE_SETTINGS = "settings"
 const val ROUTE_ABOUT = "about"
 const val ROUTE_SUPPORT = "support"
+const val ROUTE_EDITING_SELF_TEST = "editingSelfTest"
 
 @Composable
 fun RedraftNavHost(
@@ -155,6 +163,7 @@ composable(ROUTE_VIEWER) {
                     onBack = { navController.popBackStack() },
                     onOpenAbout = { navController.navigate(ROUTE_ABOUT) },
                     onOpenSupport = { navController.navigate(ROUTE_SUPPORT) },
+                    onOpenEditingSelfTest = { navController.navigate(ROUTE_EDITING_SELF_TEST) },
                 )
             }
             composable(ROUTE_ABOUT) {
@@ -167,6 +176,15 @@ composable(ROUTE_VIEWER) {
                 SupportScreen(
                     onBack = { navController.popBackStack() },
                 )
+            }
+            if (BuildConfig.DEBUG) {
+                composable(ROUTE_EDITING_SELF_TEST) {
+                    val context = LocalContext.current
+                    EditingSelfTestScreen(
+                        viewModel = viewModel(factory = EditingSelfTestViewModel.factory(context)),
+                        onBack = { navController.popBackStack() },
+                    )
+                }
             }
         }
     }

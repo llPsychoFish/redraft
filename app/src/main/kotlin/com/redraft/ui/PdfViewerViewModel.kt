@@ -2,6 +2,7 @@ package com.redraft.ui
 
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.ParcelFileDescriptor
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -1036,14 +1037,18 @@ class PdfViewerViewModel(
         if (editor.applyInProgress) return
         val selection = _selectionState.value
         if (selection == null) {
-            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_SELECTION)
+            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_SELECTION, "no line selected")
             return
         }
         val handle = editingHandle
         val engine = editingEngine
         if (handle == null || engine == null) {
             notifyEditingUnavailable("apply")
-            failEdit(com.redraft.ui.viewer.EditorEditFailure.NO_ENGINE, editingUnavailableReason)
+            failEdit(
+                com.redraft.ui.viewer.EditorEditFailure.NO_ENGINE,
+                editingUnavailableReason,
+                editorText = newText,
+            )
             return
         }
         val line = selection.selectedLine
@@ -1059,7 +1064,12 @@ class PdfViewerViewModel(
         val fontAnalysis = fontAnalysisOf(fontName)
         val fallbackDecision = analyzeFontForEdit(fontName, newText, editor.originalText)
         if (fallbackDecision == FontFallbackDecision.UNSUPPORTED_CHARS) {
-            failEdit(com.redraft.ui.viewer.EditorEditFailure.UNSUPPORTED_CHARACTER)
+            failEdit(
+                com.redraft.ui.viewer.EditorEditFailure.UNSUPPORTED_CHARACTER,
+                "new text contains characters outside Liberation Latin coverage",
+                editorText = newText,
+                fontName = fontName,
+            )
             return
         }
         val newFontName = when (fallbackDecision) {
@@ -1120,7 +1130,14 @@ class PdfViewerViewModel(
                         "matrix=original",
                 )
                 if (count == 0) {
-                    failEdit(com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND)
+                    failEdit(
+                        com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND,
+                        "no text objects on the line",
+                        path = if (formattingChanged) "replacement" else "in-place",
+                        editorText = newText,
+                        fontName = newFontName,
+                        fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                    )
                     return@launch
                 }
 
@@ -1157,29 +1174,69 @@ class PdfViewerViewModel(
                     forceReplace = formattingChanged,
                 )
                 Log.d(TAG_EDIT, "apply: editLine -> $outcome")
+                val path = if (formattingChanged) "replacement" else "in-place"
                 when (outcome) {
                     com.redraft.pdfedit.LineEditOutcome.OK -> Unit
                     com.redraft.pdfedit.LineEditOutcome.NO_OBJECTS -> {
-                        failEdit(com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND)
+                        failEdit(
+                            com.redraft.ui.viewer.EditorEditFailure.TARGET_NOT_FOUND,
+                            "no text objects on the line",
+                            code = outcome.ordinal,
+                            path = path,
+                            editorText = newText,
+                            fontName = newFontName,
+                            fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                        )
                         return@launch
                     }
                     com.redraft.pdfedit.LineEditOutcome.TEXT_MISMATCH -> {
-                        failEdit(com.redraft.ui.viewer.EditorEditFailure.PIECES_DO_NOT_ADD_UP)
+                        failEdit(
+                            com.redraft.ui.viewer.EditorEditFailure.PIECES_DO_NOT_ADD_UP,
+                            "the pieces do not add up to the line text",
+                            code = outcome.ordinal,
+                            path = path,
+                            editorText = newText,
+                            fontName = newFontName,
+                            fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                        )
                         return@launch
                     }
                     com.redraft.pdfedit.LineEditOutcome.SET_TEXT_FAILED -> {
-                        failEdit(com.redraft.ui.viewer.EditorEditFailure.FONT_FAILED)
+                        failEdit(
+                            com.redraft.ui.viewer.EditorEditFailure.FONT_FAILED,
+                            "neither SetText nor the replacement worked",
+                            code = outcome.ordinal,
+                            path = path,
+                            editorText = newText,
+                            fontName = newFontName,
+                            fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                        )
                         return@launch
                     }
                     com.redraft.pdfedit.LineEditOutcome.GENERATE_FAILED -> {
-                        failEdit(com.redraft.ui.viewer.EditorEditFailure.GENERIC)
+                        failEdit(
+                            com.redraft.ui.viewer.EditorEditFailure.GENERIC,
+                            "the page content could not be regenerated",
+                            code = outcome.ordinal,
+                            path = path,
+                            editorText = newText,
+                            fontName = newFontName,
+                            fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                        )
                         return@launch
                     }
                 }
 
                 val tempFile = createTempEditFile()
                 if (!engine.saveAsCopy(handle, tempFile.absolutePath)) {
-                    failEdit(com.redraft.ui.viewer.EditorEditFailure.SAVE_FAILED)
+                    failEdit(
+                        com.redraft.ui.viewer.EditorEditFailure.SAVE_FAILED,
+                        "saveAsCopy returned false",
+                        path = if (formattingChanged) "replacement" else "in-place",
+                        editorText = newText,
+                        fontName = newFontName,
+                        fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                    )
                     return@launch
                 }
                 Log.d(TAG_EDIT, "apply: saved ${tempFile.length()}B to ${tempFile.name}")
@@ -1203,7 +1260,15 @@ class PdfViewerViewModel(
                     "apply: reopen -> ${if (reopenError == null) "ok pages=${_uiState.value.pageCount}" else "failed: ${reopenError.message}"}",
                 )
                 if (reopenError != null) {
-                    failEdit(com.redraft.ui.viewer.EditorEditFailure.SAVE_FAILED)
+                    failEdit(
+                        com.redraft.ui.viewer.EditorEditFailure.SAVE_FAILED,
+                        reopenError.message ?: reopenError::class.simpleName,
+                        path = if (formattingChanged) "replacement" else "in-place",
+                        editorText = newText,
+                        fontName = newFontName,
+                        fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                        stackTrace = Log.getStackTraceString(reopenError),
+                    )
                     return@launch
                 }
 
@@ -1216,7 +1281,14 @@ class PdfViewerViewModel(
                 val reRendered = awaitReRenderedPage(pageIndex, bucket, dimensions)
                 Log.d(TAG_EDIT, "apply: re-render -> $reRendered")
                 if (!reRendered) {
-                    failEdit(com.redraft.ui.viewer.EditorEditFailure.RERENDER_FAILED)
+                    failEdit(
+                        com.redraft.ui.viewer.EditorEditFailure.RERENDER_FAILED,
+                        "page did not re-render within timeout",
+                        path = if (formattingChanged) "replacement" else "in-place",
+                        editorText = newText,
+                        fontName = newFontName,
+                        fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                    )
                     return@launch
                 }
 
@@ -1228,7 +1300,15 @@ class PdfViewerViewModel(
                 _editorState.value = null
             } catch (e: Throwable) {
                 Log.w(TAG_EDIT, "apply failed", e)
-                failEdit(com.redraft.ui.viewer.EditorEditFailure.GENERIC)
+                failEdit(
+                    com.redraft.ui.viewer.EditorEditFailure.GENERIC,
+                    e.message ?: e::class.simpleName,
+                    path = if (formattingChanged) "replacement" else "in-place",
+                    editorText = newText,
+                    fontName = newFontName,
+                    fontSize = if (sizeOverride > 0f) sizeOverride else null,
+                    stackTrace = Log.getStackTraceString(e),
+                )
             }
         }
     }
@@ -1237,12 +1317,28 @@ class PdfViewerViewModel(
     private fun failEdit(
         reason: com.redraft.ui.viewer.EditorEditFailure,
         detail: String? = null,
+        code: Int? = null,
+        path: String? = null,
+        editorText: String? = null,
+        pdfText: String? = null,
+        fontName: String? = null,
+        fontSize: Float? = null,
+        stackTrace: String? = null,
     ) {
         val state = _editorState.value ?: return
+        val abi = Build.SUPPORTED_ABIS?.firstOrNull() ?: Build.CPU_ABI ?: "unknown"
         _editorState.value = state.copy(
             applyInProgress = false,
             applyError = reason,
             applyErrorDetail = detail,
+            applyErrorCode = code,
+            applyErrorPath = path,
+            applyErrorEditorText = editorText ?: state.draftText,
+            applyErrorPdfText = pdfText,
+            applyErrorFontName = fontName,
+            applyErrorFontSize = fontSize,
+            applyErrorStackTrace = stackTrace,
+            applyErrorAbi = abi,
         )
         Log.d(TAG_EDIT, "apply failed: $reason ($detail)")
     }

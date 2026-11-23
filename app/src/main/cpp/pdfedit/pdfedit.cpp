@@ -206,6 +206,19 @@ Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeGetTextObjectCharCount(
     }
 }
 
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativePdfiumTest(
+    JNIEnv* env, jclass) {
+    try {
+        // Trivial idempotent call: proves PDFium symbols resolve in this process.
+        FPDF_InitLibrary();
+        return env->NewStringUTF("ok");
+    } catch (...) {
+        LOG_W("nativePdfiumTest threw");
+        return env->NewStringUTF("");
+    }
+}
+
 extern "C" JNIEXPORT jint JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeFindTextObject(
     JNIEnv* env, jclass, jlong handle, jint pageIndex,

@@ -53,6 +53,11 @@ JNIEXPORT jint JNICALL
 Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativeGetTextObjectCharCount(
     JNIEnv*, jclass, jlong handle, jint pageIndex, jint objectIndex);
 
+// 9. Trivial PDFium call to prove symbols resolve (self-test)
+JNIEXPORT jstring JNICALL
+Java_com_redraft_pdfedit_PdfEditingEngineImpl_nativePdfiumTest(
+    JNIEnv*, jclass);
+
 #ifdef __cplusplus
 }
 #endif

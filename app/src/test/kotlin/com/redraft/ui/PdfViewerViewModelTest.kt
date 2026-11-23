@@ -142,6 +142,7 @@ class PdfViewerViewModelTest {
         override suspend fun lineText(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): String = lineText
         override suspend fun lineObjectCount(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): Int = lineObjectCount
         override suspend fun lineFontSize(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float): Float = lineFontSize
+        override suspend fun pdfiumTest(): String = "ok"
         override suspend fun editLine(handle: EditingHandle, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float, expectedText: String, newText: String, fontHandle: FontHandle, fontSizePt: Float, color: Int, matrix: FloatArray?, forceReplace: Boolean): com.redraft.pdfedit.LineEditOutcome {
             editLineCalls += Triple(pageIndex, expectedText, newText)
             lastFontSizePt = fontSizePt

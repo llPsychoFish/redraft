@@ -103,6 +103,9 @@ interface PdfEditingEngine {
         bottom: Float,
     ): Float
 
+    /** Trivial PDFium call proving symbols resolve; used by the self-test screen. */
+    suspend fun pdfiumTest(): String
+
     /**
      * Edits the whole visual line, merging every text object on it into one.
      * Refuses (without changing the page) when the pieces do not add up to
@@ -169,6 +172,7 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
     private external fun nativeLineFontSize(
         handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
     ): Float
+    private external fun nativePdfiumTest(): String
     private external fun nativeEditLine(
         handle: Long, pageIndex: Int, left: Float, top: Float, right: Float, bottom: Float,
         expectedText: String, newText: String, fontHandle: Long, fontSizePt: Float,
@@ -274,6 +278,11 @@ class PdfEditingEngineImpl private constructor(private val context: Context) : P
         bottom: Float,
     ): Float = withContext(Dispatchers.IO) {
         nativeLineFontSize(handle.ptr, pageIndex, left, top, right, bottom)
+    }
+
+    /** Trivial PDFium call proving symbols resolve; used by the self-test screen. */
+    override suspend fun pdfiumTest(): String = withContext(Dispatchers.IO) {
+        nativePdfiumTest()
     }
 
     override suspend fun editLine(

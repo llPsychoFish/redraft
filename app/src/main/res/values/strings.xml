@@ -53,6 +53,11 @@
     <string name="settings_section_about">About</string>
     <string name="settings_about_redraft">About Redraft</string>
     <string name="settings_support_redraft">Support Redraft</string>
+    <string name="settings_editing_self_test">Editing self-test</string>
+    <string name="settings_editing_self_test_subtitle">Debug only. Runs each step of the native editing pipeline and reports PASS/FAIL per step.</string>
+    <string name="settings_editing_self_test_run">Run self-test</string>
+    <string name="settings_editing_self_test_running">Running…</string>
+    <string name="settings_editing_self_test_copy_report">Copy report</string>
 
     <!-- About Screen -->
     <string name="about_title">About Redraft</string>
@@ -143,6 +148,7 @@
     <string name="edit_error_generic">The edit failed. Nothing was changed.</string>
     <string name="apply">Apply</string>
     <string name="cancel">Cancel</string>
+    <string name="edit_copy_details">Copy details</string>
     <string name="edit_failed">Edit failed: %s</string>
     <string name="select_line_first">Select a line first</string>
     <string name="line_not_editable">This text cannot be edited</string>

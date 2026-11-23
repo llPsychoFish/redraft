@@ -39,6 +39,22 @@ data class EditorPanelState(
     val selectedItalic: Boolean = false,
     /** User-selected text colour for formatting (defaults to the line's own colour). */
     val selectedColor: Int = 0,           // 0 = use the line's own textColor
+    /** Diagnostic: native result code from the failing edit step. */
+    val applyErrorCode: Int? = null,
+    /** Diagnostic: "in-place" or "replacement" path that was attempted. */
+    val applyErrorPath: String? = null,
+    /** Diagnostic: the editor's draft text at failure time. */
+    val applyErrorEditorText: String? = null,
+    /** Diagnostic: the text found in the PDF objects at failure time. */
+    val applyErrorPdfText: String? = null,
+    /** Diagnostic: the font name used or attempted. */
+    val applyErrorFontName: String? = null,
+    /** Diagnostic: the font size used or attempted. */
+    val applyErrorFontSize: Float? = null,
+    /** Diagnostic: exception stack trace if any. */
+    val applyErrorStackTrace: String? = null,
+    /** Diagnostic: device ABI. */
+    val applyErrorAbi: String? = null,
 ) {
     fun withDraftText(newText: String): EditorPanelState =
         copy(draftText = newText, applyError = null)

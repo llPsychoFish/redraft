@@ -21,6 +21,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Divider
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,6 +47,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.redraft.R
 import kotlinx.coroutines.delay
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.os.Build
+import androidx.compose.ui.platform.LocalContext
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -156,20 +162,51 @@ fun EditorPanel(
         // Every failure is reported here, inside the panel, not in a snackbar
         // that can sit behind the keyboard.
         state.applyError?.let { error ->
-            Text(
-                text = error.message(),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
+            val context = LocalContext.current
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            Column(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            )
-        }
-        state.applyErrorDetail?.let { detail ->
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-            )
+            ) {
+                Text(
+                    text = error.message(),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                state.applyErrorDetail?.let { detail ->
+                    Text(
+                        text = detail,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                    )
+                }
+                Button(
+                    onClick = {
+                        val report = buildString {
+                            appendLine("Redraft Edit Failure Details")
+                            appendLine("==============================")
+                            appendLine("Failure type: $error")
+                            state.applyErrorCode?.let { appendLine("Native result code: $it") }
+                            state.applyErrorPath?.let { appendLine("Path: $it") }
+                            appendLine("Object count on line: ${state.lineObjectCount}")
+                            appendLine("Editor text: ${state.applyErrorEditorText ?: state.draftText}")
+                            state.applyErrorPdfText?.let { appendLine("PDF object text: $it") }
+                            state.applyErrorFontName?.let { appendLine("Font name: $it") }
+                            state.applyErrorFontSize?.let { appendLine("Font size: $it pt") }
+                            appendLine("Device ABI: ${state.applyErrorAbi ?: Build.SUPPORTED_ABIS.firstOrNull() ?: Build.CPU_ABI ?: "unknown"}")
+                            state.applyErrorStackTrace?.let { appendLine("Stack trace:\n$it") }
+                        }
+                        clipboard.setPrimaryClip(ClipData.newPlainText("edit-failure-details", report))
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    ),
+                ) {
+                    Text(text = stringResource(R.string.edit_copy_details))
+                }
+            }
         }
 
         // Format bar: size, bold, italic, colour (one row, horizontally scrollable on small screens)

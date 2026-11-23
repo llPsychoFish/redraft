@@ -13,6 +13,10 @@ object PdfEditModule {
     @Volatile private var appContext: Context? = null
     @Volatile private var libraryLoaded = false
 
+    /** True once libpdfedit.so has been successfully loaded. */
+    val isLibraryLoaded: Boolean
+        get() = libraryLoaded
+
     fun initialize(context: Context) {
         appContext = context.applicationContext
     }

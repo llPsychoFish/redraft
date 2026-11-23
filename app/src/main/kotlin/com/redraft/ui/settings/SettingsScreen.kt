@@ -1,7 +1,9 @@
 package com.redraft.ui.settings
 
 import android.os.Build
+import com.redraft.BuildConfig
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
@@ -51,6 +53,8 @@ import com.redraft.data.AppSettings
 import com.redraft.ui.PdfViewerViewModel
 import com.redraft.ui.theme.ThemeMode
 import kotlinx.coroutines.launch
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,6 +64,7 @@ fun SettingsScreen(
     onBack: () -> Unit,
     onOpenAbout: () -> Unit,
     onOpenSupport: () -> Unit,
+    onOpenEditingSelfTest: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val recentFilesClearedMsg = stringResource(R.string.settings_recent_files_cleared)
@@ -126,6 +131,18 @@ fun SettingsScreen(
             }
             item { HorizontalDivider() }
             item { SectionHeader(stringResource(R.string.settings_section_about)) }
+            if (BuildConfig.DEBUG) {
+                item {
+                    ListItem(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable { onOpenEditingSelfTest() },
+                        leadingContent = { Box(Modifier.size(20.dp)) },
+                        headlineContent = { Text(text = stringResource(R.string.settings_editing_self_test), style = MaterialTheme.typography.titleMedium) },
+                    )
+                }
+            }
             item { NavigationRow(title = stringResource(R.string.settings_about_redraft), onClick = onOpenAbout) }
             item { NavigationRow(title = stringResource(R.string.settings_support_redraft), onClick = onOpenSupport) }
         }

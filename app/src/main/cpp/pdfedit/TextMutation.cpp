@@ -15,21 +15,33 @@ constexpr float kMinObjectAreaInsideLine = 0.6f;
 // space character between the pieces.
 constexpr float kWordGapFraction = 0.12f;
 
+// Whitespace includes the PDF "invisible" characters: NBSP (U+00A0),
+// zero-width space (U+200B) and soft hyphen (U+00AD). Treating them as
+// whitespace lets a gap made from any of them match a normal space gap.
+constexpr bool isWhitespace(char16_t c) {
+    return c == u' ' || c == u'\t' || c == u'\r' || c == u'\n' ||
+           c == 0x00A0 || c == 0x200B || c == 0x00AD;
+}
+
+// Collapse repeated whitespace inside a piece but KEEP a single leading and
+// trailing space when the piece has one. Do not trim pieces: a space that
+// belongs between two pieces must survive so lineText can see it at the join.
 std::u16string normalizeWhitespace(const std::u16string& in) {
     std::u16string out;
     out.reserve(in.size());
-    bool lastWasSpace = true;
+    bool lastWasSpace = false;
     for (char16_t c : in) {
-        const bool space = c == u' ' || c == u'\t' || c == u'\r' || c == u'\n';
+        const bool space = isWhitespace(c);
         if (space) {
-            if (!lastWasSpace) out.push_back(u' ');
-            lastWasSpace = true;
+            if (!lastWasSpace && !out.empty()) {
+                out.push_back(u' ');
+                lastWasSpace = true;
+            }
         } else {
             out.push_back(c);
             lastWasSpace = false;
         }
     }
-    while (!out.empty() && out.back() == u' ') out.pop_back();
     return out;
 }
 
@@ -40,7 +52,7 @@ std::u16string compactForMatch(const std::u16string& in) {
     std::u16string out;
     out.reserve(in.size());
     for (char16_t c : in) {
-        if (c == u' ' || c == u'\t' || c == u'\r' || c == u'\n') continue;
+        if (isWhitespace(c)) continue;
         out.push_back(c);
     }
     return out;
@@ -338,13 +350,19 @@ std::u16string lineText(const std::vector<LinePiece>& pieces) {
     for (const LinePiece& piece : pieces) {
         if (previous != nullptr) {
             const bool previousEndsSpace =
-                !previous->text.empty() && (previous->text.back() == u' ' || previous->text.back() == u'\t');
+                !previous->text.empty() && isWhitespace(previous->text.back());
             const bool nextStartsSpace =
-                !piece.text.empty() && (piece.text.front() == u' ' || piece.text.front() == u'\t');
+                !piece.text.empty() && isWhitespace(piece.text.front());
             const float size = std::max(previous->fontSize, piece.fontSize);
             const float gap = piece.left - previous->right;
+            // Single-character pieces use a wider threshold so a gap inside a
+            // word (one char per object) does not get a space inserted.
+            const float threshold =
+                (previous->text.size() == 1 && piece.text.size() == 1)
+                    ? 0.25f * size
+                    : kWordGapFraction * size;
             if (!previousEndsSpace && !nextStartsSpace && size > 0.0f &&
-                gap > kWordGapFraction * size) {
+                gap > threshold) {
                 out.push_back(u' ');
             }
         }
