@@ -16,7 +16,7 @@ import com.redraft.pdfcore.PdfRect
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.selection.TapTolerance
 import com.redraft.pdfcore.selection.groupBlocks
-import kotlin.coroutines.coroutineContext
+import kotlin.system.measureTimeMillis
 import kotlin.math.roundToInt
 import com.redraft.pdfcore.selection.hitTest
 import com.redraft.pdfcore.selection.pageTextLayout
@@ -442,6 +442,9 @@ class PdfViewerViewModel(
     // - pageTextStates: the last known state per page.
     // - extractionJobs: the in-flight extraction per page — a second tap
     //   awaits the existing job instead of starting a second extraction.
+    private val _renderVersions = mutableMapOf<Int, MutableStateFlow<Int>>()
+    fun renderVersionFlow(pageIndex: Int): Flow<Int> =
+        _renderVersions.getOrPut(pageIndex) { MutableStateFlow(0) }.asStateFlow()
     private val textLayoutCache = LinkedHashMap<Int, com.redraft.pdfcore.selection.TextPageLayout>(16, 0.75f, true)
     private val pageTextStates = mutableMapOf<Int, PageTextState>()
     private val extractionJobs = mutableMapOf<Int, Job>()
@@ -1488,7 +1491,7 @@ class PdfViewerViewModel(
         textLayoutCache.remove(pageIndex)
         blockIdsByPage.remove(pageIndex)
         _blockIdsByPage.value = blockIdsByPage.toMap()
-        // Kick off render for visible pages (existing mechanism handles this)
+        _renderVersions.getOrPut(pageIndex) { MutableStateFlow(0) }.update { it + 1 }
         // The cross-fade will be triggered when PageBitmapCache detects invalidated page
         // Reselection will be triggered via LaunchedEffect in PdfViewerScreen observing textLayoutCache
     }

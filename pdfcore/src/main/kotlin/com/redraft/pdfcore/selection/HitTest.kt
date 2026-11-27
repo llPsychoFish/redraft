@@ -5,6 +5,7 @@ import com.redraft.pdfcore.PdfRect
 import com.redraft.pdfcore.PdfViewportTransform
 import com.redraft.pdfcore.ScreenPoint
 import com.redraft.pdfcore.ViewportState
+import kotlin.math.abs
 
 /**
  * Hit-test result: the line selected by a tap, plus metadata needed by the
@@ -129,7 +130,7 @@ fun hitTest(
     var best: Band? = null
     var bestDx = Float.MAX_VALUE
     var bestWidth = -Float.MAX_VALUE
-
+    var bestVertical = Float.MAX_VALUE
     for (band in bands) {
         if (tapPdf.y < band.minY || tapPdf.y > band.maxY) continue
         val r = band.line.rect
@@ -138,16 +139,12 @@ fun hitTest(
             tapPdf.x > r.maxX -> tapPdf.x - r.maxX
             else -> 0f
         }
-        // A tap equidistant from a short marker and the long line beside it is
-        // meant for the line, so width breaks the tie.
-        if (dx < bestDx || (dx == bestDx && r.width > bestWidth)) {
-            // The horizontal tolerance still gates the tap: outside every box by
-            // more than padX there is nothing to select.
-            if (dx <= padX) {
-                bestDx = dx
-                bestWidth = r.width
-                best = band
-            }
+        val halfHeight = (r.height / 2f).coerceAtLeast(0.01f)
+        val vertical = abs(tapPdf.y - (r.minY + r.maxY) / 2f) / halfHeight
+        val closerVertically = vertical < bestVertical - 0.15f
+        val equallyClose = abs(vertical - bestVertical) <= 0.15f
+        if (dx < bestDx || (dx == bestDx && (closerVertically || (equallyClose && r.width > bestWidth)))) {
+            if (dx <= padX) { bestDx = dx; bestWidth = r.width; bestVertical = vertical; best = band }
         }
     }
 
